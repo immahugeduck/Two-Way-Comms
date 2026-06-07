@@ -1,14 +1,40 @@
 import { supabase } from './supabase';
 import type { Database } from './supabase';
+import { encryptForRecipient, decryptContent } from './encryption';
 
 type Message = Database['public']['Tables']['messages']['Row'];
+
+// Returns the other user's ID for a direct chat, null for groups
+async function getDirectChatRecipient(chatId: string, senderId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('chat_members')
+    .select('user_id')
+    .eq('chat_id', chatId)
+    .neq('user_id', senderId)
+    .limit(1);
+
+  const { data: chat } = await supabase
+    .from('chats')
+    .select('type')
+    .eq('id', chatId)
+    .single();
+
+  if (chat?.type !== 'direct') return null;
+  return data?.[0]?.user_id ?? null;
+}
 
 export async function sendTextMessage(
   chatId: string,
   senderId: string,
-  content: string,
+  plaintext: string,
   expiresAt?: string
 ): Promise<Message> {
+  // Attempt E2E for direct chats
+  const recipientId = await getDirectChatRecipient(chatId, senderId);
+  const { content, status } = recipientId
+    ? await encryptForRecipient(plaintext, recipientId)
+    : { content: plaintext, status: 'in_transit' as const };
+
   const { data, error } = await supabase
     .from('messages')
     .insert({
@@ -17,7 +43,7 @@ export async function sendTextMessage(
       message_type: 'text',
       content,
       audio_url: null,
-      encryption_status: 'in_transit',
+      encryption_status: status,
       expires_at: expiresAt ?? null,
     })
     .select()
@@ -60,6 +86,18 @@ export async function fetchMessages(chatId: string): Promise<Message[]> {
 
   if (error) throw error;
   return data ?? [];
+}
+
+/**
+ * Decrypts a message's content in place.
+ * Only decrypts text messages with e2e status.
+ */
+export async function decryptMessage(msg: Message): Promise<Message> {
+  if (msg.message_type !== 'text' || msg.encryption_status !== 'e2e' || !msg.content) {
+    return msg;
+  }
+  const decrypted = await decryptContent(msg.content, msg.sender_id);
+  return { ...msg, content: decrypted };
 }
 
 export function subscribeToMessages(
@@ -105,6 +143,32 @@ export async function getOrCreateDirectChat(
     { chat_id: chat.id, user_id: userB, role: 'member' },
   ]);
 
+  if (memberError) throw memberError;
+
+  return chat.id;
+}
+
+export async function createGroupChat(
+  creatorId: string,
+  memberIds: string[],
+  groupName: string
+): Promise<string> {
+  const { data: chat, error: chatError } = await supabase
+    .from('chats')
+    .insert({ type: 'group', group_name: groupName })
+    .select()
+    .single();
+
+  if (chatError) throw chatError;
+
+  const allMembers = Array.from(new Set([creatorId, ...memberIds]));
+  const memberRows = allMembers.map((uid) => ({
+    chat_id: chat.id,
+    user_id: uid,
+    role: uid === creatorId ? 'admin' : 'member',
+  }));
+
+  const { error: memberError } = await supabase.from('chat_members').insert(memberRows);
   if (memberError) throw memberError;
 
   return chat.id;

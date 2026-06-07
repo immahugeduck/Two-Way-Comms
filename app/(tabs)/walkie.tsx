@@ -1,34 +1,35 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { getOrCreateDirectChat } from '@/lib/messages';
-import { sendVoiceMessage } from '@/lib/messages';
-import { startRecording, stopRecording, uploadAudio } from '@/lib/audio';
+import { getOrCreateDirectChat, sendVoiceMessage } from '@/lib/messages';
 import WalkieButton from '@/components/WalkieButton';
 import ContactCard from '@/components/ContactCard';
-import { colors, spacing, typography } from '@/constants/theme';
+import { colors, spacing, radius, typography } from '@/constants/theme';
 
-interface Contact {
-  id: string;
-  display_name: string;
-  username: string;
-  avatar_url: string | null;
+interface Conversation {
+  chatId: string;
+  chatType: 'direct' | 'group';
+  name: string;
+  username?: string;
+  avatarUrl?: string | null;
+  lastActivity: string | null;
+  userId?: string;
 }
 
 export default function WalkieScreen() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [activeContact, setActiveContact] = useState<Contact | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeConv, setActiveConv] = useState<Conversation | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
@@ -36,77 +37,166 @@ export default function WalkieScreen() {
 
   useEffect(() => {
     if (!userId) return;
-    fetchContacts();
+    fetchConversations();
   }, [userId]);
 
-  const fetchContacts = async () => {
+  const fetchConversations = async () => {
     if (!userId) return;
-    const { data } = await supabase
-      .from('contacts')
-      .select('contact_user_id, profiles!contacts_contact_user_id_fkey(id, display_name, username, avatar_url)')
-      .eq('owner_id', userId)
-      .eq('status', 'accepted');
 
-    const list: Contact[] = (data ?? []).map((r: any) => r.profiles).filter(Boolean);
-    setContacts(list);
+    const { data: memberRows } = await supabase
+      .from('chat_members')
+      .select('chat_id')
+      .eq('user_id', userId);
+
+    if (!memberRows?.length) { setLoading(false); return; }
+
+    const chatIds = memberRows.map((r) => r.chat_id);
+    const convs: Conversation[] = [];
+
+    for (const chatId of chatIds) {
+      const { data: chat } = await supabase
+        .from('chats')
+        .select('type, group_name')
+        .eq('id', chatId)
+        .single();
+
+      const { data: lastMsg } = await supabase
+        .from('messages')
+        .select('created_at')
+        .eq('chat_id', chatId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (chat?.type === 'group') {
+        convs.push({
+          chatId,
+          chatType: 'group',
+          name: chat.group_name ?? 'Group',
+          lastActivity: lastMsg?.created_at ?? null,
+        });
+      } else {
+        const { data: other } = await supabase
+          .from('chat_members')
+          .select('user_id, profiles(id, display_name, username, avatar_url)')
+          .eq('chat_id', chatId)
+          .neq('user_id', userId)
+          .limit(1)
+          .maybeSingle();
+
+        const profile = other?.profiles as any;
+        if (profile) {
+          convs.push({
+            chatId,
+            chatType: 'direct',
+            name: profile.display_name,
+            username: profile.username,
+            avatarUrl: profile.avatar_url,
+            lastActivity: lastMsg?.created_at ?? null,
+            userId: profile.id,
+          });
+        }
+      }
+    }
+
+    setConversations(
+      convs.sort((a, b) => (b.lastActivity ?? '').localeCompare(a.lastActivity ?? ''))
+    );
+    setLoading(false);
   };
 
-  const selectContact = async (contact: Contact) => {
-    if (!userId) return;
-    setActiveContact(contact);
-    const chatId = await getOrCreateDirectChat(userId, contact.id);
-    setActiveChatId(chatId);
+  const selectConversation = (conv: Conversation) => {
+    setActiveConv(conv);
   };
 
-  const handleAudioSent = async (audioUrl: string) => {
-    if (!activeChatId || !userId) return;
-    await sendVoiceMessage(activeChatId, userId, audioUrl);
+  const openChat = (conv: Conversation) => {
+    router.push(`/chats/${conv.chatId}`);
   };
+
+  const handleAudioSent = useCallback(async (audioUrl: string) => {
+    if (!activeConv || !userId) return;
+    await sendVoiceMessage(activeConv.chatId, userId, audioUrl);
+  }, [activeConv, userId]);
 
   return (
     <View style={styles.container}>
-      <View style={styles.pttSection}>
-        <Text style={[typography.h2, styles.heading]}>
-          {activeContact ? `Talking to ${activeContact.display_name}` : 'Push to Talk'}
-        </Text>
-
-        {activeChatId ? (
+      {/* PTT Zone */}
+      <View style={styles.pttZone}>
+        {activeConv ? (
           <>
-            <WalkieButton chatId={activeChatId} onAudioSent={handleAudioSent} size="large" />
-            <TouchableOpacity style={styles.changeBtn} onPress={() => {
-              setActiveContact(null);
-              setActiveChatId(null);
-            }}>
-              <Text style={[typography.bodySmall, styles.changeBtnText]}>Change Contact</Text>
+            <Text style={[typography.bodySmall, styles.toLabel]}>Talking to</Text>
+            <Text style={[typography.h2, styles.activeName]}>{activeConv.name}</Text>
+            <WalkieButton
+              chatId={activeConv.chatId}
+              onAudioSent={handleAudioSent}
+              size="large"
+            />
+            <TouchableOpacity style={styles.openChatBtn} onPress={() => openChat(activeConv)}>
+              <Text style={styles.openChatText}>Open Thread →</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setActiveConv(null)} style={styles.changeBtn}>
+              <Text style={styles.changeBtnText}>Change</Text>
             </TouchableOpacity>
           </>
         ) : (
-          <View style={styles.placeholder}>
-            <Text style={styles.placeholderIcon}>📻</Text>
-            <Text style={typography.bodySmall}>Select a contact below to start</Text>
-          </View>
+          <>
+            <Text style={styles.idleIcon}>📻</Text>
+            <Text style={[typography.h2, styles.idleTitle]}>Walkie</Text>
+            <Text style={[typography.bodySmall, styles.idleSubtitle]}>
+              Select a conversation below{'\n'}then hold the button to talk
+            </Text>
+          </>
         )}
       </View>
 
-      <View style={styles.contactsSection}>
-        <Text style={[typography.label, styles.sectionLabel]}>RECENT CONTACTS</Text>
-        {contacts.length === 0 ? (
-          <View style={styles.emptyContacts}>
-            <Text style={typography.bodySmall}>No contacts yet. Add some from Contacts tab.</Text>
+      {/* Conversations */}
+      <View style={styles.listSection}>
+        <View style={styles.listHeader}>
+          <Text style={styles.listHeaderText}>CONVERSATIONS</Text>
+          <TouchableOpacity onPress={() => router.push('/chats/new-group')}>
+            <Text style={styles.newGroupBtn}>+ New Group</Text>
+          </TouchableOpacity>
+        </View>
+
+        {loading ? (
+          <ActivityIndicator color={colors.primary} style={styles.loader} />
+        ) : conversations.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={typography.bodySmall}>
+              No conversations yet. Start a chat from the Contacts tab.
+            </Text>
           </View>
         ) : (
           <FlatList
-            data={contacts}
-            keyExtractor={(item) => item.id}
+            data={conversations}
+            keyExtractor={(item) => item.chatId}
             renderItem={({ item }) => (
-              <ContactCard
-                id={item.id}
-                displayName={item.display_name}
-                username={item.username}
-                avatarUrl={item.avatar_url}
-                onPress={() => selectContact(item)}
-                onWalkiePress={() => selectContact(item)}
-              />
+              <TouchableOpacity
+                style={[styles.convRow, activeConv?.chatId === item.chatId && styles.convRowActive]}
+                onPress={() => selectConversation(item)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.convAvatar}>
+                  <Text style={styles.convAvatarText}>
+                    {item.chatType === 'group' ? '👥' : item.name[0].toUpperCase()}
+                  </Text>
+                </View>
+                <View style={styles.convInfo}>
+                  <Text style={[typography.body, styles.convName]}>{item.name}</Text>
+                  {item.username && (
+                    <Text style={typography.bodySmall}>@{item.username}</Text>
+                  )}
+                  {item.chatType === 'group' && (
+                    <Text style={typography.bodySmall}>Group chat</Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={styles.pttBtn}
+                  onPress={() => selectConversation(item)}
+                >
+                  <Text style={styles.pttIcon}>🎙</Text>
+                </TouchableOpacity>
+              </TouchableOpacity>
             )}
           />
         )}
@@ -117,34 +207,74 @@ export default function WalkieScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  pttSection: {
+  pttZone: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xl,
+    gap: spacing.md,
     paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.xl,
   },
-  heading: { textAlign: 'center' },
-  placeholder: { alignItems: 'center', gap: spacing.sm },
-  placeholderIcon: { fontSize: 64 },
+  toLabel: { color: colors.textMuted },
+  activeName: { textAlign: 'center', marginBottom: spacing.sm },
+  openChatBtn: {
+    paddingVertical: spacing.xs,
+  },
+  openChatText: { color: colors.primary, fontSize: 14, fontWeight: '600' },
   changeBtn: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
   },
-  changeBtnText: { color: colors.primary },
-  contactsSection: {
+  changeBtnText: { color: colors.textMuted, fontSize: 14 },
+  idleIcon: { fontSize: 56 },
+  idleTitle: {},
+  idleSubtitle: { textAlign: 'center', color: colors.textSecondary, lineHeight: 22 },
+  listSection: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    maxHeight: 280,
+    maxHeight: 300,
   },
-  sectionLabel: {
+  listHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: colors.background,
-    letterSpacing: 1,
   },
-  emptyContacts: {
-    padding: spacing.xl,
+  listHeaderText: { ...typography.label, letterSpacing: 1 },
+  newGroupBtn: { color: colors.primary, fontSize: 14, fontWeight: '600' },
+  loader: { marginTop: spacing.lg },
+  empty: { padding: spacing.xl, alignItems: 'center' },
+  convRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
+  convRowActive: {
+    backgroundColor: colors.primaryDim,
+  },
+  convAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  convAvatarText: { fontSize: 20, color: colors.primary },
+  convInfo: { flex: 1 },
+  convName: { marginBottom: 2 },
+  pttBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.full,
+    backgroundColor: colors.walkieDim,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pttIcon: { fontSize: 18 },
 });

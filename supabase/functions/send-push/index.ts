@@ -88,11 +88,15 @@ Deno.serve(async (req) => {
 
   const tokens = tokenRows.map((r) => r.token);
 
-  // Build notification body
-  const body =
-    message_type === 'audio'
-      ? '🎙 Sent a voice message'
-      : content ?? 'New message';
+  // Build notification body — never expose E2E ciphertext
+  let body: string;
+  if (message_type === 'audio') {
+    body = '🎙 Voice message';
+  } else if (encryption_status === 'e2e') {
+    body = '🔒 New encrypted message';
+  } else {
+    body = content ?? 'New message';
+  }
 
   const messages: ExpoPushMessage[] = tokens.map((token) => ({
     to: token,
