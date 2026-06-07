@@ -29,8 +29,16 @@
       "permissions": [
         "RECORD_AUDIO",
         "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "WRITE_EXTERNAL_STORAGE",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
       ]
+    },
+    "notification": {
+      "icon": "./assets/notification-icon.png",
+      "color": "#00D4AA",
+      "androidMode": "default",
+      "androidCollapsedTitle": "#{unread_notifications} new messages"
     },
     "web": {
       "bundler": "metro",
@@ -44,6 +52,17 @@
         "expo-av",
         {
           "microphonePermission": "Allow Relay to access the microphone for push-to-talk."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#00D4AA",
+          "sounds": [],
+          "androidMode": "default",
+          "androidCollapsedTitle": "#{unread_notifications} new messages",
+          "iosDisplayInForeground": true
         }
       ]
     ],
