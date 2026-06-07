@@ -65,6 +65,17 @@ export type Database = {
         Insert: Omit<Database['public']['Tables']['messages']['Row'], 'id' | 'created_at'>;
         Update: Partial<Database['public']['Tables']['messages']['Insert']>;
       };
+      push_tokens: {
+        Row: {
+          id: string;
+          user_id: string;
+          token: string;
+          platform: 'ios' | 'android' | 'web';
+          created_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['push_tokens']['Row'], 'id' | 'created_at'>;
+        Update: Partial<Database['public']['Tables']['push_tokens']['Insert']>;
+      };
     };
   };
 };
