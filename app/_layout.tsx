@@ -14,6 +14,7 @@ import {
   removeSubscription,
   clearBadge,
 } from '@/lib/notifications';
+import { ensureKeyPair } from '@/lib/keystore';
 import type { Subscription } from 'expo-notifications';
 
 export default function RootLayout() {
@@ -23,25 +24,30 @@ export default function RootLayout() {
   const notifReceivedSub = useRef<Subscription | null>(null);
   const notifResponseSub = useRef<Subscription | null>(null);
 
-  // Auth state listener — redirects on login/logout and handles push token lifecycle
+  // Auth state listener — handles redirects, push token, and E2E key lifecycle
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const inAuthGroup = segments[0] === 'auth';
 
       if (!session) {
-        // Clean up push token on sign-out
         if (pushToken.current) {
           await removePushToken(pushToken.current);
           pushToken.current = null;
         }
         if (!inAuthGroup) router.replace('/auth/login');
       } else {
-        // Register push notifications after sign-in
+        // Generate or restore E2E key pair for this user
+        ensureKeyPair(session.user.id).catch(() => {
+          // Non-fatal: app still works with in_transit encryption
+        });
+
+        // Register for push notifications
         const token = await registerForPushNotificationsAsync();
-        if (token && session.user) {
+        if (token) {
           pushToken.current = token;
           await storePushToken(session.user.id, token);
         }
+
         if (inAuthGroup) router.replace('/(tabs)/chats');
       }
     });
@@ -51,17 +57,13 @@ export default function RootLayout() {
 
   // Notification listeners
   useEffect(() => {
-    // Foreground notification received — clear badge when app is open
-    notifReceivedSub.current = addNotificationReceivedListener((_notification) => {
+    notifReceivedSub.current = addNotificationReceivedListener(() => {
       clearBadge();
     });
 
-    // User tapped a notification — navigate to the relevant chat
     notifResponseSub.current = addNotificationResponseReceivedListener((response) => {
       const chatId = response.notification.request.content.data?.chatId as string | undefined;
-      if (chatId) {
-        router.push(`/chats/${chatId}`);
-      }
+      if (chatId) router.push(`/chats/${chatId}`);
     });
 
     return () => {
@@ -88,6 +90,10 @@ export default function RootLayout() {
         <Stack.Screen
           name="chats/[chatId]"
           options={{ title: '', headerBackTitle: 'Back' }}
+        />
+        <Stack.Screen
+          name="chats/new-group"
+          options={{ title: 'New Group', headerBackTitle: 'Cancel', presentation: 'modal' }}
         />
       </Stack>
     </GestureHandlerRootView>

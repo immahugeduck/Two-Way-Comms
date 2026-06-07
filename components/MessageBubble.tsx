@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 import { colors, spacing, radius, typography } from '@/constants/theme';
 import PrivacyBadge from './PrivacyBadge';
-import { playAudio } from '@/lib/audio';
+import AudioPlayer from './AudioPlayer';
 import type { EncryptionStatus } from '@/lib/encryption';
 
 interface Props {
@@ -14,6 +14,7 @@ interface Props {
   senderName?: string;
   timestamp: string;
   encryptionStatus: EncryptionStatus;
+  autoPlayAudio?: boolean;
 }
 
 export default function MessageBubble({
@@ -24,19 +25,8 @@ export default function MessageBubble({
   senderName,
   timestamp,
   encryptionStatus,
+  autoPlayAudio = false,
 }: Props) {
-  const [playing, setPlaying] = useState(false);
-
-  const handlePlayAudio = async () => {
-    if (!audioUrl || playing) return;
-    try {
-      setPlaying(true);
-      await playAudio(audioUrl);
-    } finally {
-      setPlaying(false);
-    }
-  };
-
   const time = new Date(timestamp).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
@@ -50,28 +40,15 @@ export default function MessageBubble({
         )}
 
         {type === 'text' && content ? (
-          <Text style={[typography.body, styles.messageText]}>{content}</Text>
-        ) : type === 'audio' ? (
-          <TouchableOpacity style={styles.audioRow} onPress={handlePlayAudio}>
-            {playing ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : (
-              <Text style={styles.playIcon}>▶</Text>
-            )}
-            <View style={styles.waveform}>
-              {Array.from({ length: 20 }).map((_, i) => (
-                <View
-                  key={i}
-                  style={[styles.bar, { height: 4 + Math.sin(i * 0.8) * 8 }]}
-                />
-              ))}
-            </View>
-            <Text style={styles.audioDuration}>PTT</Text>
-          </TouchableOpacity>
+          <Text style={[styles.messageText, isOwn && styles.messageTextOwn]}>
+            {content}
+          </Text>
+        ) : type === 'audio' && audioUrl ? (
+          <AudioPlayer url={audioUrl} isOwn={isOwn} autoPlay={autoPlayAudio} />
         ) : null}
 
         <View style={styles.footer}>
-          <Text style={styles.time}>{time}</Text>
+          <Text style={[styles.time, isOwn && styles.timeOwn]}>{time}</Text>
           <PrivacyBadge status={encryptionStatus} compact />
         </View>
       </View>
@@ -81,24 +58,25 @@ export default function MessageBubble({
 
 const styles = StyleSheet.create({
   row: {
-    marginVertical: spacing.xs,
+    marginVertical: 3,
     paddingHorizontal: spacing.md,
     flexDirection: 'row',
   },
   rowOwn: { justifyContent: 'flex-end' },
   rowOther: { justifyContent: 'flex-start' },
   bubble: {
-    maxWidth: '75%',
+    maxWidth: '78%',
     borderRadius: radius.lg,
-    padding: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
   },
   bubbleOwn: {
     backgroundColor: colors.bubbleOwn,
-    borderBottomRightRadius: radius.sm,
+    borderBottomRightRadius: radius.xs ?? 4,
   },
   bubbleOther: {
     backgroundColor: colors.bubbleOther,
-    borderBottomLeftRadius: radius.sm,
+    borderBottomLeftRadius: radius.xs ?? 4,
   },
   senderName: {
     ...typography.label,
@@ -107,33 +85,11 @@ const styles = StyleSheet.create({
   },
   messageText: {
     color: colors.textPrimary,
+    fontSize: 16,
     lineHeight: 22,
   },
-  audioRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  playIcon: {
-    color: colors.primary,
-    fontSize: 18,
-  },
-  waveform: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    flex: 1,
-  },
-  bar: {
-    width: 3,
-    backgroundColor: colors.primary,
-    borderRadius: 2,
-    opacity: 0.7,
-  },
-  audioDuration: {
-    ...typography.caption,
-    color: colors.textSecondary,
+  messageTextOwn: {
+    color: '#FFFFFF',
   },
   footer: {
     flexDirection: 'row',
@@ -143,7 +99,10 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   time: {
-    ...typography.caption,
+    fontSize: 11,
     color: colors.textMuted,
+  },
+  timeOwn: {
+    color: 'rgba(255,255,255,0.5)',
   },
 });

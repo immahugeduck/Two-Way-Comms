@@ -1,9 +1,9 @@
-import { Audio } from 'expo-av';
+import { Audio, AVPlaybackStatus } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import { supabase } from './supabase';
 
-let recording: Audio.Recording | null = null;
-let sound: Audio.Sound | null = null;
+let activeRecording: Audio.Recording | null = null;
+let recordingStartTime: number | null = null;
 
 export async function requestMicrophonePermission(): Promise<boolean> {
   const { status } = await Audio.requestPermissionsAsync();
@@ -19,22 +19,45 @@ export async function startRecording(): Promise<void> {
     playsInSilentModeIOS: true,
   });
 
-  const { recording: rec } = await Audio.Recording.createAsync(
+  const { recording } = await Audio.Recording.createAsync(
     Audio.RecordingOptionsPresets.HIGH_QUALITY
   );
-  recording = rec;
+  activeRecording = recording;
+  recordingStartTime = Date.now();
+}
+
+export function getRecordingDurationMs(): number {
+  if (!recordingStartTime) return 0;
+  return Date.now() - recordingStartTime;
 }
 
 export async function stopRecording(): Promise<string | null> {
-  if (!recording) return null;
+  if (!activeRecording) return null;
 
-  await recording.stopAndUnloadAsync();
-  const uri = recording.getURI();
-  recording = null;
+  await activeRecording.stopAndUnloadAsync();
+  const uri = activeRecording.getURI();
+  activeRecording = null;
+  recordingStartTime = null;
 
   await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
 
   return uri ?? null;
+}
+
+export async function cancelRecording(): Promise<void> {
+  if (!activeRecording) return;
+  try {
+    await activeRecording.stopAndUnloadAsync();
+  } catch {}
+  const uri = activeRecording.getURI();
+  activeRecording = null;
+  recordingStartTime = null;
+
+  // Delete the temp file
+  if (uri) {
+    try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch {}
+  }
+  await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
 }
 
 export async function uploadAudio(
@@ -54,33 +77,67 @@ export async function uploadAudio(
 
   if (error) throw error;
 
-  const { data: publicUrl } = supabase.storage
+  const { data: publicUrlData } = supabase.storage
     .from('voice-messages')
     .getPublicUrl(data.path);
 
-  return publicUrl.publicUrl;
+  // Clean up local temp file
+  try { await FileSystem.deleteAsync(localUri, { idempotent: true }); } catch {}
+
+  return publicUrlData.publicUrl;
 }
 
-export async function playAudio(url: string): Promise<void> {
-  if (sound) {
-    await sound.unloadAsync();
-    sound = null;
-  }
+export interface AudioPlayerHandle {
+  play: () => Promise<void>;
+  pause: () => Promise<void>;
+  stop: () => Promise<void>;
+  unload: () => Promise<void>;
+  getDuration: () => number; // ms
+  getPosition: () => number; // ms
+  isPlaying: () => boolean;
+}
 
+export async function createAudioPlayer(
+  url: string,
+  onStatusUpdate?: (status: { isPlaying: boolean; positionMs: number; durationMs: number; didFinish: boolean }) => void
+): Promise<AudioPlayerHandle> {
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: false,
     playsInSilentModeIOS: true,
+    staysActiveInBackground: false,
   });
 
-  const { sound: newSound } = await Audio.Sound.createAsync({ uri: url });
-  sound = newSound;
-  await sound.playAsync();
+  let durationMs = 0;
+  let positionMs = 0;
+  let playing = false;
+
+  const { sound } = await Audio.Sound.createAsync(
+    { uri: url },
+    { shouldPlay: false },
+    (status: AVPlaybackStatus) => {
+      if (!status.isLoaded) return;
+      durationMs = status.durationMillis ?? 0;
+      positionMs = status.positionMillis;
+      playing = status.isPlaying;
+      const didFinish = status.didJustFinish ?? false;
+      onStatusUpdate?.({ isPlaying: playing, positionMs, durationMs, didFinish });
+    }
+  );
+
+  return {
+    play: async () => { await sound.playAsync(); },
+    pause: async () => { await sound.pauseAsync(); },
+    stop: async () => { await sound.stopAsync(); },
+    unload: async () => { await sound.unloadAsync(); },
+    getDuration: () => durationMs,
+    getPosition: () => positionMs,
+    isPlaying: () => playing,
+  };
 }
 
-export async function stopPlayback(): Promise<void> {
-  if (sound) {
-    await sound.stopAsync();
-    await sound.unloadAsync();
-    sound = null;
-  }
+export function formatAudioDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }

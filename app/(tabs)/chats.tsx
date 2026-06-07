@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,22 +7,18 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, radius, typography } from '@/constants/theme';
 
 interface ChatPreview {
   id: string;
-  otherUser: {
-    id: string;
-    display_name: string;
-    username: string;
-    avatar_url: string | null;
-  } | null;
+  chatType: 'direct' | 'group';
+  name: string;
+  subtitle: string;
   lastMessage: string | null;
   lastMessageType: 'text' | 'audio' | null;
   lastMessageAt: string | null;
-  unread: number;
 }
 
 export default function ChatsScreen() {
@@ -37,10 +33,11 @@ export default function ChatsScreen() {
     });
   }, []);
 
-  useEffect(() => {
-    if (!userId) return;
-    fetchChats();
-  }, [userId]);
+  useFocusEffect(
+    useCallback(() => {
+      if (userId) fetchChats();
+    }, [userId])
+  );
 
   const fetchChats = async () => {
     if (!userId) return;
@@ -60,36 +57,62 @@ export default function ChatsScreen() {
     const previews: ChatPreview[] = [];
 
     for (const chatId of chatIds) {
-      const { data: members } = await supabase
-        .from('chat_members')
-        .select('user_id, profiles(id, display_name, username, avatar_url)')
-        .eq('chat_id', chatId)
-        .neq('user_id', userId)
-        .limit(1);
-
-      const other = members?.[0]?.profiles as ChatPreview['otherUser'] ?? null;
+      const { data: chat } = await supabase
+        .from('chats')
+        .select('type, group_name')
+        .eq('id', chatId)
+        .single();
 
       const { data: lastMsg } = await supabase
         .from('messages')
-        .select('content, message_type, created_at')
+        .select('content, message_type, created_at, encryption_status')
         .eq('chat_id', chatId)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
+
+      let name = 'Unknown';
+      let subtitle = '';
+
+      if (chat?.type === 'group') {
+        name = chat.group_name ?? 'Group';
+        subtitle = 'Group chat';
+      } else {
+        const { data: other } = await supabase
+          .from('chat_members')
+          .select('profiles(display_name, username)')
+          .eq('chat_id', chatId)
+          .neq('user_id', userId)
+          .limit(1)
+          .maybeSingle();
+
+        const profile = other?.profiles as any;
+        name = profile?.display_name ?? 'Unknown';
+        subtitle = profile?.username ? `@${profile.username}` : '';
+      }
+
+      // Don't show E2E message content in preview
+      let previewContent = lastMsg?.content ?? null;
+      if (lastMsg?.encryption_status === 'e2e' && lastMsg.message_type === 'text') {
+        previewContent = '🔒 Encrypted message';
+      }
 
       previews.push({
         id: chatId,
-        otherUser: other,
-        lastMessage: lastMsg?.content ?? null,
+        chatType: chat?.type ?? 'direct',
+        name,
+        subtitle,
+        lastMessage: previewContent,
         lastMessageType: lastMsg?.message_type ?? null,
         lastMessageAt: lastMsg?.created_at ?? null,
-        unread: 0,
       });
     }
 
-    setChats(previews.sort((a, b) =>
-      (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')
-    ));
+    setChats(
+      previews.sort((a, b) =>
+        (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')
+      )
+    );
     setLoading(false);
   };
 
@@ -100,15 +123,21 @@ export default function ChatsScreen() {
         : item.lastMessage ?? 'No messages yet';
 
     const time = item.lastMessageAt
-      ? new Date(item.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      ? new Date(item.lastMessageAt).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
       : '';
 
-    const initials = (item.otherUser?.display_name ?? '?')
-      .split(' ')
-      .map((w) => w[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
+    const initials =
+      item.chatType === 'group'
+        ? '👥'
+        : item.name
+            .split(' ')
+            .map((w) => w[0])
+            .join('')
+            .toUpperCase()
+            .slice(0, 2);
 
     return (
       <TouchableOpacity
@@ -117,21 +146,37 @@ export default function ChatsScreen() {
         activeOpacity={0.7}
       >
         <View style={styles.avatar}>
-          <Text style={styles.initials}>{initials}</Text>
+          <Text style={item.chatType === 'group' ? styles.groupIcon : styles.initials}>
+            {initials}
+          </Text>
         </View>
         <View style={styles.chatInfo}>
-          <Text style={[typography.body, styles.name]}>
-            {item.otherUser?.display_name ?? 'Unknown'}
+          <Text style={[typography.body, styles.name]}>{item.name}</Text>
+          <Text style={typography.bodySmall} numberOfLines={1}>
+            {preview}
           </Text>
-          <Text style={typography.bodySmall} numberOfLines={1}>{preview}</Text>
         </View>
-        <Text style={[typography.caption, styles.time]}>{time}</Text>
+        <View style={styles.meta}>
+          <Text style={[typography.caption, styles.time]}>{time}</Text>
+          {item.chatType === 'group' && (
+            <Text style={styles.groupBadge}>Group</Text>
+          )}
+        </View>
       </TouchableOpacity>
     );
   };
 
   return (
     <View style={styles.container}>
+      <View style={styles.toolbar}>
+        <TouchableOpacity
+          style={styles.newGroupBtn}
+          onPress={() => router.push('/chats/new-group')}
+        >
+          <Text style={styles.newGroupText}>+ Group</Text>
+        </TouchableOpacity>
+      </View>
+
       {loading ? (
         <ActivityIndicator style={styles.loader} color={colors.primary} />
       ) : chats.length === 0 ? (
@@ -155,6 +200,21 @@ export default function ChatsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  toolbar: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  newGroupBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.primaryDim,
+    borderRadius: radius.full,
+  },
+  newGroupText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
   loader: { marginTop: spacing.xxl },
   empty: {
     flex: 1,
@@ -183,7 +243,19 @@ const styles = StyleSheet.create({
     marginRight: spacing.md,
   },
   initials: { ...typography.h3, color: colors.primary, fontSize: 16 },
+  groupIcon: { fontSize: 24 },
   chatInfo: { flex: 1 },
   name: { marginBottom: 2 },
+  meta: { alignItems: 'flex-end', gap: 4 },
   time: { color: colors.textMuted },
+  groupBadge: {
+    fontSize: 10,
+    color: colors.primary,
+    backgroundColor: colors.primaryDim,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+    fontWeight: '600',
+    overflow: 'hidden',
+  },
 });
