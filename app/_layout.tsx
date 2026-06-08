@@ -99,6 +99,14 @@ export default function RootLayout() {
           name="profile/edit"
           options={{ title: 'Edit Profile', headerBackTitle: 'Settings' }}
         />
+        <Stack.Screen
+          name="profile/qr"
+          options={{ title: 'My QR Code', headerBackTitle: 'Back' }}
+        />
+        <Stack.Screen
+          name="profile/scan"
+          options={{ headerShown: false }}
+        />
       </Stack>
     </GestureHandlerRootView>
   );
