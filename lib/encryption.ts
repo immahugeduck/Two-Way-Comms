@@ -65,7 +65,15 @@ export async function decryptContent(
   let payload: E2EPayload;
   try {
     const parsed = JSON.parse(content);
-    if (!parsed?.e2e) return content;
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      parsed.e2e !== true ||
+      typeof parsed.c !== 'string' ||
+      typeof parsed.n !== 'string'
+    ) {
+      return content;
+    }
     payload = parsed;
   } catch {
     return content;

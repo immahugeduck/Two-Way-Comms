@@ -6,7 +6,6 @@ import AudioPlayer from './AudioPlayer';
 import type { EncryptionStatus } from '@/lib/encryption';
 
 interface Props {
-  id: string;
   type: 'text' | 'audio';
   content?: string | null;
   audioUrl?: string | null;

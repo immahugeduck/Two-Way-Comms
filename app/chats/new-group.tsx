@@ -94,7 +94,7 @@ export default function NewGroupScreen() {
         <Text style={styles.label}>GROUP NAME</Text>
         <TextInput
           style={styles.input}
-          placeholder="e.g. Team Relay, Family Chat..."
+          placeholder="e.g. Team 2Way, Family Chat..."
           placeholderTextColor={colors.textMuted}
           value={groupName}
           onChangeText={setGroupName}

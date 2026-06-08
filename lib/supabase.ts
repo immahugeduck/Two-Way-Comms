@@ -25,6 +25,7 @@ export type Database = {
           username: string;
           display_name: string;
           avatar_url: string | null;
+          public_key: string | null;
           created_at: string;
         };
         Insert: Omit<Database['public']['Tables']['profiles']['Row'], 'created_at'>;
@@ -45,6 +46,8 @@ export type Database = {
         Row: {
           id: string;
           type: 'direct' | 'group';
+          group_name: string | null;
+          group_avatar_url: string | null;
           created_at: string;
         };
         Insert: Omit<Database['public']['Tables']['chats']['Row'], 'id' | 'created_at'>;

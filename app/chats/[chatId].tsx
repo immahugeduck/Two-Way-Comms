@@ -9,7 +9,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Animated,
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -20,7 +19,6 @@ import {
   subscribeToMessages,
   decryptMessage,
 } from '@/lib/messages';
-import { uploadAudio } from '@/lib/audio';
 import MessageBubble from '@/components/MessageBubble';
 import WalkieButton from '@/components/WalkieButton';
 import PrivacyBadge from '@/components/PrivacyBadge';
@@ -37,13 +35,13 @@ export default function ChatScreen() {
   const [text, setText] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [chatName, setChatName] = useState('Chat');
+  const [error, setError] = useState<string | null>(null);
   const [chatType, setChatType] = useState<'direct' | 'group'>('direct');
   const [walkieMode, setWalkieMode] = useState(false);
   const [latestAudioId, setLatestAudioId] = useState<string | null>(null);
+  const [senderNames, setSenderNames] = useState<Record<string, string>>({});
 
   const listRef = useRef<FlatList>(null);
-  const inputSlide = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
@@ -51,6 +49,7 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!userId || !chatId) return;
+
     loadChatMeta();
     loadMessages();
 
@@ -58,6 +57,10 @@ export default function ChatScreen() {
       const decrypted = await decryptMessage(msg);
       setMessages((prev) => [...prev, decrypted]);
       if (msg.message_type === 'audio') setLatestAudioId(msg.id);
+      // Fetch sender name if we don't have it yet
+      if (msg.sender_id !== userId && !senderNames[msg.sender_id]) {
+        fetchSenderName(msg.sender_id);
+      }
     });
 
     return () => { supabase.removeChannel(channel); };
@@ -67,6 +70,17 @@ export default function ChatScreen() {
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
   }, [messages.length]);
 
+  const fetchSenderName = async (uid: string) => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, display_name')
+      .eq('id', uid)
+      .single();
+    if (data) {
+      setSenderNames((prev) => ({ ...prev, [data.id]: data.display_name }));
+    }
+  };
+
   const loadChatMeta = async () => {
     const { data: chat } = await supabase
       .from('chats')
@@ -75,13 +89,11 @@ export default function ChatScreen() {
       .single();
 
     if (chat?.type === 'group' && chat.group_name) {
-      setChatName(chat.group_name);
       setChatType('group');
       navigation.setOptions({ title: chat.group_name });
       return;
     }
 
-    // Direct chat — show other user's name
     const { data: members } = await supabase
       .from('chat_members')
       .select('user_id, profiles(display_name)')
@@ -90,42 +102,51 @@ export default function ChatScreen() {
       .limit(1);
 
     const name = (members?.[0]?.profiles as any)?.display_name;
-    if (name) {
-      setChatName(name);
-      navigation.setOptions({ title: name });
-    }
+    if (name) navigation.setOptions({ title: name });
   };
 
   const loadMessages = async () => {
-    const raw = await fetchMessages(chatId);
-    const decrypted = await Promise.all(raw.map(decryptMessage));
-    setMessages(decrypted);
-    const lastAudio = [...decrypted].reverse().find((m) => m.message_type === 'audio');
-    if (lastAudio) setLatestAudioId(lastAudio.id);
-    setLoading(false);
+    try {
+      const raw = await fetchMessages(chatId);
+      const decrypted = await Promise.all(raw.map(decryptMessage));
+      setMessages(decrypted);
+
+      // Build sender name map for all non-self senders
+      const otherIds = [...new Set(raw.map((m) => m.sender_id).filter((id) => id !== userId))];
+      if (otherIds.length) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, display_name')
+          .in('id', otherIds);
+        if (data) {
+          setSenderNames(Object.fromEntries(data.map((p) => [p.id, p.display_name])));
+        }
+      }
+
+      const lastAudio = [...decrypted].reverse().find((m) => m.message_type === 'audio');
+      if (lastAudio) setLatestAudioId(lastAudio.id);
+    } catch (e: any) {
+      setError('Failed to load messages');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSendText = async () => {
     if (!text.trim() || !userId || !chatId) return;
     const content = text.trim();
     setText('');
-    await sendTextMessage(chatId, userId, content);
+    try {
+      await sendTextMessage(chatId, userId, content);
+    } catch {
+      setError('Failed to send message');
+    }
   };
 
   const handleAudioSent = useCallback(async (audioUrl: string) => {
     if (!userId || !chatId) return;
     await sendVoiceMessage(chatId, userId, audioUrl);
   }, [userId, chatId]);
-
-  const toggleWalkieMode = () => {
-    const toWalkie = !walkieMode;
-    setWalkieMode(toWalkie);
-    Animated.timing(inputSlide, {
-      toValue: toWalkie ? 0 : 1,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-  };
 
   const encryptionStatus = chatType === 'direct' ? 'e2e' : 'in_transit';
 
@@ -135,19 +156,26 @@ export default function ChatScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={90}
     >
-      {/* Privacy bar */}
       <View style={styles.privacyBar}>
         <PrivacyBadge status={encryptionStatus as any} />
+        {chatType === 'group' && (
+          <Text style={styles.groupEncNote}>Group messages use private transport</Text>
+        )}
       </View>
 
-      {/* Messages */}
       {loading ? (
         <ActivityIndicator style={styles.loader} color={colors.primary} />
+      ) : error ? (
+        <View style={styles.empty}>
+          <Text style={[typography.bodySmall, { color: colors.danger }]}>{error}</Text>
+        </View>
       ) : messages.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>💬</Text>
           <Text style={typography.bodySmall}>
-            {chatType === 'direct' ? 'Send a message or hold the mic to talk.' : 'Group chat started. Say hello!'}
+            {chatType === 'direct'
+              ? 'Send a message or hold the mic to talk.'
+              : 'Group chat started. Say hello!'}
           </Text>
         </View>
       ) : (
@@ -157,12 +185,15 @@ export default function ChatScreen() {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <MessageBubble
-              id={item.id}
               type={item.message_type as 'text' | 'audio'}
               content={item.content}
               audioUrl={item.audio_url}
               isOwn={item.sender_id === userId}
-              senderName={chatType === 'group' && item.sender_id !== userId ? undefined : undefined}
+              senderName={
+                chatType === 'group' && item.sender_id !== userId
+                  ? senderNames[item.sender_id]
+                  : undefined
+              }
               timestamp={item.created_at}
               encryptionStatus={item.encryption_status as any}
               autoPlayAudio={item.id === latestAudioId && item.sender_id !== userId}
@@ -173,10 +204,8 @@ export default function ChatScreen() {
         />
       )}
 
-      {/* Input bar */}
       <View style={styles.inputBar}>
-        {/* Walkie mode toggle */}
-        <TouchableOpacity style={styles.modeToggle} onPress={toggleWalkieMode}>
+        <TouchableOpacity style={styles.modeToggle} onPress={() => setWalkieMode((v) => !v)}>
           <Text style={styles.modeIcon}>{walkieMode ? '⌨️' : '🎙'}</Text>
         </TouchableOpacity>
 
@@ -212,11 +241,19 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   privacyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  groupEncNote: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontStyle: 'italic',
   },
   loader: { marginTop: spacing.xxl },
   empty: {
