@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Relay",
-    "slug": "relay-secure-walkie",
+    "name": "2Way",
+    "slug": "2way-secure-walkie",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,11 +13,11 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.relay.securechat",
+      "bundleIdentifier": "com.twoway.securechat",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Relay needs microphone access for push-to-talk voice messages.",
-        "NSCameraUsageDescription": "Relay needs camera access to set your profile photo.",
-        "NSPhotoLibraryUsageDescription": "Relay needs photo library access to set your profile photo."
+        "NSMicrophoneUsageDescription": "2Way needs microphone access for push-to-talk voice messages.",
+        "NSCameraUsageDescription": "2Way needs camera access to set your profile photo.",
+        "NSPhotoLibraryUsageDescription": "2Way needs photo library access to set your profile photo."
       }
     },
     "android": {
@@ -25,7 +25,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0A0A0A"
       },
-      "package": "com.relay.securechat",
+      "package": "com.twoway.securechat",
       "permissions": [
         "RECORD_AUDIO",
         "READ_EXTERNAL_STORAGE",
@@ -51,7 +51,7 @@
       [
         "expo-av",
         {
-          "microphonePermission": "Allow Relay to access the microphone for push-to-talk."
+          "microphonePermission": "Allow 2Way to access the microphone for push-to-talk."
         }
       ],
       [
@@ -66,7 +66,7 @@
         }
       ]
     ],
-    "scheme": "relay",
+    "scheme": "twoway",
     "experiments": {
       "typedRoutes": true
     }

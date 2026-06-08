@@ -69,7 +69,7 @@ export default function SignupScreen() {
         <Text style={styles.logo}>📡</Text>
         <Text style={[typography.h1, styles.title]}>Create Account</Text>
         <Text style={[typography.bodySmall, styles.subtitle]}>
-          Join Relay. Stay private.
+          Join 2Way. Stay private.
         </Text>
 
         <View style={styles.form}>

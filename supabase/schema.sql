@@ -1,5 +1,5 @@
 -- ============================================================
--- Relay Secure Walkie — Phase 1 Database Schema
+-- 2Way Secure Walkie — Phase 1 Database Schema
 -- ============================================================
 
 -- Enable UUID generation

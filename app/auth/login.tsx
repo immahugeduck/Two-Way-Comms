@@ -42,7 +42,7 @@ export default function LoginScreen() {
     >
       <View style={styles.inner}>
         <Text style={styles.logo}>📡</Text>
-        <Text style={[typography.h1, styles.title]}>Relay</Text>
+        <Text style={[typography.h1, styles.title]}>2Way</Text>
         <Text style={[typography.bodySmall, styles.subtitle]}>
           Private communication. Simple and fast.
         </Text>
@@ -84,7 +84,7 @@ export default function LoginScreen() {
         <View style={styles.footer}>
           <Text style={[typography.bodySmall]}>Don't have an account? </Text>
           <Link href="/auth/signup" style={styles.link}>
-            <Text style={styles.link}>Sign up</Text>
+            Sign up
           </Link>
         </View>
 

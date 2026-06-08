@@ -12,7 +12,7 @@ interface WebhookPayload {
     message_type: 'text' | 'audio' | 'system';
     content: string | null;
     audio_url: string | null;
-    encryption_status: string;
+    encryption_status: 'none' | 'in_transit' | 'e2e';
     expires_at: string | null;
     created_at: string;
   };
@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     return new Response('Ignored', { status: 200 });
   }
 
-  const { chat_id, sender_id, message_type, content } = payload.record;
+  const { chat_id, sender_id, message_type, content, encryption_status } = payload.record;
 
   // Get sender display name
   const { data: sender } = await supabase
