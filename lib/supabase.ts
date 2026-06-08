@@ -79,6 +79,21 @@ export type Database = {
         Insert: Omit<Database['public']['Tables']['push_tokens']['Row'], 'id' | 'created_at'>;
         Update: Partial<Database['public']['Tables']['push_tokens']['Insert']>;
       };
+      message_reads: {
+        Row: {
+          message_id: string;
+          user_id: string;
+          chat_id: string;
+          read_at: string;
+        };
+        Insert: {
+          message_id: string;
+          user_id: string;
+          chat_id: string;
+          read_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['message_reads']['Insert']>;
+      };
     };
   };
 };

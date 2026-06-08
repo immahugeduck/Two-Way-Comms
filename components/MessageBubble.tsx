@@ -14,6 +14,7 @@ interface Props {
   timestamp: string;
   encryptionStatus: EncryptionStatus;
   autoPlayAudio?: boolean;
+  readStatus?: 'sent' | 'read';
 }
 
 export default function MessageBubble({
@@ -25,6 +26,7 @@ export default function MessageBubble({
   timestamp,
   encryptionStatus,
   autoPlayAudio = false,
+  readStatus,
 }: Props) {
   const time = new Date(timestamp).toLocaleTimeString([], {
     hour: '2-digit',
@@ -49,6 +51,14 @@ export default function MessageBubble({
         <View style={styles.footer}>
           <Text style={[styles.time, isOwn && styles.timeOwn]}>{time}</Text>
           <PrivacyBadge status={encryptionStatus} compact />
+          {isOwn && readStatus && (
+            <Text style={[
+              styles.readTick,
+              readStatus === 'read' ? styles.readTickRead : styles.readTickSent,
+            ]}>
+              {readStatus === 'read' ? '✓✓' : '✓'}
+            </Text>
+          )}
         </View>
       </View>
     </View>
@@ -103,5 +113,15 @@ const styles = StyleSheet.create({
   },
   timeOwn: {
     color: 'rgba(255,255,255,0.5)',
+  },
+  readTick: {
+    fontSize: 11,
+    letterSpacing: -1,
+  },
+  readTickSent: {
+    color: 'rgba(255,255,255,0.4)',
+  },
+  readTickRead: {
+    color: colors.primary,
   },
 });

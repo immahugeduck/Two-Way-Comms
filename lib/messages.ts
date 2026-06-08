@@ -77,15 +77,73 @@ export async function sendVoiceMessage(
   return data;
 }
 
-export async function fetchMessages(chatId: string): Promise<Message[]> {
-  const { data, error } = await supabase
+const PAGE_SIZE = 50;
+
+// Returns messages in descending order (newest first) for use with inverted FlatList.
+// Pass `before` (ISO timestamp) to load messages older than that point.
+export async function fetchMessages(
+  chatId: string,
+  options: { before?: string; limit?: number } = {}
+): Promise<Message[]> {
+  let query = supabase
     .from('messages')
     .select('*')
     .eq('chat_id', chatId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: false })
+    .limit(options.limit ?? PAGE_SIZE);
 
+  if (options.before) {
+    query = query.lt('created_at', options.before);
+  }
+
+  const { data, error } = await query;
   if (error) throw error;
   return data ?? [];
+}
+
+// Marks messages as read by the given user. Silently ignores duplicate reads.
+export async function markMessagesRead(
+  messageIds: string[],
+  userId: string,
+  chatId: string
+): Promise<void> {
+  if (!messageIds.length) return;
+  const rows = messageIds.map((message_id) => ({ message_id, user_id: userId, chat_id: chatId }));
+  await supabase.from('message_reads').insert(rows);
+  // Ignore conflict errors (already-read messages) — they're expected
+}
+
+// Returns all read records for a chat (used to seed initial readBy state).
+export async function fetchReadReceipts(
+  chatId: string
+): Promise<{ message_id: string; user_id: string }[]> {
+  const { data } = await supabase
+    .from('message_reads')
+    .select('message_id, user_id')
+    .eq('chat_id', chatId);
+  return data ?? [];
+}
+
+export function subscribeToReadReceipts(
+  chatId: string,
+  onRead: (messageId: string, userId: string) => void
+) {
+  return supabase
+    .channel(`reads:${chatId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'message_reads',
+        filter: `chat_id=eq.${chatId}`,
+      },
+      (payload) => {
+        const row = payload.new as { message_id: string; user_id: string };
+        onRead(row.message_id, row.user_id);
+      }
+    )
+    .subscribe();
 }
 
 /**
