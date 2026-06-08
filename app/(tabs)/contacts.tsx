@@ -96,6 +96,15 @@ export default function ContactsScreen() {
         <Text style={styles.addButtonText}>+ Add Contact</Text>
       </TouchableOpacity>
 
+      <View style={styles.qrRow}>
+        <TouchableOpacity style={styles.qrBtn} onPress={() => router.push('/profile/qr')}>
+          <Text style={styles.qrBtnText}>📲  My QR Code</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.qrBtn} onPress={() => router.push('/profile/scan')}>
+          <Text style={styles.qrBtnText}>📷  Scan QR</Text>
+        </TouchableOpacity>
+      </View>
+
       {contacts.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>👥</Text>
@@ -180,12 +189,28 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   addButton: {
     margin: spacing.md,
+    marginBottom: spacing.sm,
     backgroundColor: colors.primary,
     borderRadius: radius.md,
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
   addButtonText: { color: colors.background, fontWeight: '700', fontSize: 15 },
+  qrRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+  },
+  qrBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  qrBtnText: { color: colors.textSecondary, fontSize: 14 },
   empty: {
     flex: 1,
     alignItems: 'center',
