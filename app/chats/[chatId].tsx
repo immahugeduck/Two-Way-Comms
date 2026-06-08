@@ -23,6 +23,7 @@ import {
   fetchReadReceipts,
   subscribeToReadReceipts,
 } from '@/lib/messages';
+import { getGroupSymKey } from '@/lib/encryption';
 import MessageBubble from '@/components/MessageBubble';
 import DateSeparator from '@/components/DateSeparator';
 import WalkieButton from '@/components/WalkieButton';
@@ -84,6 +85,7 @@ export default function ChatScreen() {
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chatType, setChatType] = useState<'direct' | 'group'>('direct');
+  const [groupE2E, setGroupE2E] = useState(false);
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
   const [walkieMode, setWalkieMode] = useState(false);
   const [latestAudioId, setLatestAudioId] = useState<string | null>(null);
@@ -196,6 +198,8 @@ export default function ChatScreen() {
     if (chat?.type === 'group' && chat.group_name) {
       setChatType('group');
       navigation.setOptions({ title: chat.group_name });
+      // Check whether the current user has a group E2E key
+      getGroupSymKey(chatId).then((key) => setGroupE2E(!!key));
       return;
     }
 
@@ -329,7 +333,7 @@ export default function ChatScreen() {
 
   const listData = useMemo(() => buildListData(messages), [messages]);
 
-  const encryptionStatus = chatType === 'direct' ? 'e2e' : 'in_transit';
+  const encryptionStatus = chatType === 'direct' || groupE2E ? 'e2e' : 'in_transit';
 
   return (
     <KeyboardAvoidingView
@@ -339,8 +343,8 @@ export default function ChatScreen() {
     >
       <View style={styles.privacyBar}>
         <PrivacyBadge status={encryptionStatus as any} />
-        {chatType === 'group' && (
-          <Text style={styles.groupEncNote}>Group messages use private transport</Text>
+        {chatType === 'group' && !groupE2E && (
+          <Text style={styles.groupEncNote}>Group key pending — messages in transit</Text>
         )}
       </View>
 

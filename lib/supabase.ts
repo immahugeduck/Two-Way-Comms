@@ -94,6 +94,23 @@ export type Database = {
         };
         Update: Partial<Database['public']['Tables']['message_reads']['Insert']>;
       };
+      group_keys: {
+        Row: {
+          chat_id: string;
+          user_id: string;
+          encrypted_sym_key: string;
+          key_nonce: string;
+          sender_public_key: string;
+        };
+        Insert: {
+          chat_id: string;
+          user_id: string;
+          encrypted_sym_key: string;
+          key_nonce: string;
+          sender_public_key: string;
+        };
+        Update: Partial<Database['public']['Tables']['group_keys']['Insert']>;
+      };
     };
   };
 };

@@ -181,11 +181,12 @@ export default function SettingsScreen() {
 
       <Section title="Encryption">
         <View style={styles.encryptionInfo}>
-          <PrivacyBadge status="in_transit" />
+          <PrivacyBadge status="e2e" />
           <Text style={[typography.bodySmall, styles.encryptionNote]}>
-            1-on-1 messages are end-to-end encrypted using NaCl (X25519 + XSalsa20).
-            Group messages use private transport encryption.
-            Full Signal Protocol double-ratchet is planned for a future release.
+            All messages — 1-on-1 and group — are end-to-end encrypted using NaCl
+            (X25519 key exchange + XSalsa20-Poly1305). Group chats use a shared
+            symmetric key distributed to each member at creation time.
+            Signal Protocol double-ratchet is planned for a future release.
           </Text>
         </View>
       </Section>
