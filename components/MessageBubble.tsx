@@ -15,6 +15,7 @@ interface Props {
   encryptionStatus: EncryptionStatus;
   autoPlayAudio?: boolean;
   readStatus?: 'sent' | 'read';
+  isGrouped?: boolean;
 }
 
 export default function MessageBubble({
@@ -27,6 +28,7 @@ export default function MessageBubble({
   encryptionStatus,
   autoPlayAudio = false,
   readStatus,
+  isGrouped = false,
 }: Props) {
   const time = new Date(timestamp).toLocaleTimeString([], {
     hour: '2-digit',
@@ -34,8 +36,12 @@ export default function MessageBubble({
   });
 
   return (
-    <View style={[styles.row, isOwn ? styles.rowOwn : styles.rowOther]}>
-      <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther]}>
+    <View style={[styles.row, isOwn ? styles.rowOwn : styles.rowOther, isGrouped && styles.rowGrouped]}>
+      <View style={[
+        styles.bubble,
+        isOwn ? styles.bubbleOwn : styles.bubbleOther,
+        isGrouped && (isOwn ? styles.bubbleOwnGrouped : styles.bubbleOtherGrouped),
+      ]}>
         {!isOwn && senderName && (
           <Text style={styles.senderName}>{senderName}</Text>
         )}
@@ -73,6 +79,7 @@ const styles = StyleSheet.create({
   },
   rowOwn: { justifyContent: 'flex-end' },
   rowOther: { justifyContent: 'flex-start' },
+  rowGrouped: { marginVertical: 1 },
   bubble: {
     maxWidth: '78%',
     borderRadius: radius.lg,
@@ -81,11 +88,17 @@ const styles = StyleSheet.create({
   },
   bubbleOwn: {
     backgroundColor: colors.bubbleOwn,
-    borderBottomRightRadius: radius.xs ?? 4,
+    borderBottomRightRadius: radius.xs,
   },
   bubbleOther: {
     backgroundColor: colors.bubbleOther,
-    borderBottomLeftRadius: radius.xs ?? 4,
+    borderBottomLeftRadius: radius.xs,
+  },
+  bubbleOwnGrouped: {
+    borderTopRightRadius: radius.xs,
+  },
+  bubbleOtherGrouped: {
+    borderTopLeftRadius: radius.xs,
   },
   senderName: {
     ...typography.label,

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import {
   subscribeToReadReceipts,
 } from '@/lib/messages';
 import MessageBubble from '@/components/MessageBubble';
+import DateSeparator from '@/components/DateSeparator';
 import WalkieButton from '@/components/WalkieButton';
 import PrivacyBadge from '@/components/PrivacyBadge';
 import { colors, spacing, radius, typography } from '@/constants/theme';
@@ -31,8 +32,43 @@ import type { Database } from '@/lib/supabase';
 
 type Message = Database['public']['Tables']['messages']['Row'];
 
+type ListItem =
+  | { type: 'message'; data: Message; isGrouped: boolean }
+  | { type: 'separator'; date: string; key: string };
+
 const SETTINGS_KEY = 'twoWay_privacy_settings';
 const PAGE_SIZE = 50;
+const GROUP_THRESHOLD_MS = 5 * 60 * 1000;
+const TYPING_STOP_DELAY = 3000;
+
+// Builds a combined list of messages and date separators.
+// Messages array is newest-first (for inverted FlatList).
+function buildListData(messages: Message[]): ListItem[] {
+  const result: ListItem[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    // A message is "grouped" if the chronologically previous message (array index i+1 = older)
+    // is from the same sender within the grouping threshold.
+    const older = messages[i + 1];
+    const isGrouped =
+      !!older &&
+      older.sender_id === messages[i].sender_id &&
+      new Date(messages[i].created_at).getTime() - new Date(older.created_at).getTime() <
+        GROUP_THRESHOLD_MS;
+
+    result.push({ type: 'message', data: messages[i], isGrouped });
+
+    // Insert a date separator when the day changes (or after the oldest message)
+    const currDay = new Date(messages[i].created_at).toDateString();
+    const nextDay = messages[i + 1]
+      ? new Date(messages[i + 1].created_at).toDateString()
+      : null;
+
+    if (!nextDay || currDay !== nextDay) {
+      result.push({ type: 'separator', date: messages[i].created_at, key: `sep-${messages[i].id}` });
+    }
+  }
+  return result;
+}
 
 export default function ChatScreen() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
@@ -42,6 +78,7 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
+  const [myDisplayName, setMyDisplayName] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -51,14 +88,31 @@ export default function ChatScreen() {
   const [walkieMode, setWalkieMode] = useState(false);
   const [latestAudioId, setLatestAudioId] = useState<string | null>(null);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
-  // readBy[messageId] = array of userIds who have read it
   const [readBy, setReadBy] = useState<Record<string, string[]>>({});
   const [readReceiptsEnabled, setReadReceiptsEnabled] = useState(true);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
 
   const listRef = useRef<FlatList>(null);
+  const typingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const stopTypingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Load user identity + privacy setting
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+    supabase.auth.getUser().then(({ data }) => {
+      const uid = data.user?.id ?? null;
+      setUserId(uid);
+      if (uid) {
+        supabase
+          .from('profiles')
+          .select('display_name')
+          .eq('id', uid)
+          .single()
+          .then(({ data: p }) => {
+            if (p) setMyDisplayName(p.display_name);
+          });
+      }
+    });
+
     AsyncStorage.getItem(SETTINGS_KEY).then((stored) => {
       if (stored) {
         try {
@@ -84,7 +138,6 @@ export default function ChatScreen() {
       if (msg.sender_id !== userId && !senderNames[msg.sender_id]) {
         fetchSenderName(msg.sender_id);
       }
-      // Mark incoming message as read immediately if setting is on
       if (msg.sender_id !== userId && readReceiptsEnabled) {
         markMessagesRead([msg.id], userId, chatId);
       }
@@ -97,9 +150,28 @@ export default function ChatScreen() {
       }));
     });
 
+    // Presence channel for typing indicators
+    const typingChannel = supabase.channel(`typing:${chatId}`, {
+      config: { presence: { key: userId } },
+    });
+    typingChannel.on('presence', { event: 'sync' }, () => {
+      const state = typingChannel.presenceState<{ displayName: string; typing: boolean }>();
+      const typing = Object.entries(state)
+        .filter(([key]) => key !== userId)
+        .flatMap(([, presences]) => presences)
+        .filter((p) => p.typing)
+        .map((p) => p.displayName);
+      setTypingUsers(typing);
+    });
+    typingChannel.subscribe();
+    typingChannelRef.current = typingChannel;
+
     return () => {
       supabase.removeChannel(msgChannel);
       supabase.removeChannel(readsChannel);
+      supabase.removeChannel(typingChannel);
+      typingChannelRef.current = null;
+      if (stopTypingTimer.current) clearTimeout(stopTypingTimer.current);
     };
   }, [userId, chatId, readReceiptsEnabled]);
 
@@ -153,7 +225,6 @@ export default function ChatScreen() {
       setMessages(decrypted);
       setHasMore(raw.length === PAGE_SIZE);
 
-      // Seed readBy map
       const readMap: Record<string, string[]> = {};
       for (const r of reads) {
         if (!readMap[r.message_id]) readMap[r.message_id] = [];
@@ -161,7 +232,6 @@ export default function ChatScreen() {
       }
       setReadBy(readMap);
 
-      // Batch-mark all other-sender messages as read
       if (readReceiptsEnabled) {
         const unread = raw
           .filter((m) => m.sender_id !== userId)
@@ -169,7 +239,6 @@ export default function ChatScreen() {
         if (unread.length) markMessagesRead(unread, userId!, chatId);
       }
 
-      // Build sender name map
       const otherIds = [...new Set(raw.map((m) => m.sender_id).filter((id) => id !== userId))];
       if (otherIds.length) {
         const { data } = await supabase
@@ -200,7 +269,6 @@ export default function ChatScreen() {
       setMessages((prev) => [...prev, ...decrypted]);
       setHasMore(raw.length === PAGE_SIZE);
 
-      // Fetch sender names for any new senders
       const newIds = [...new Set(raw.map((m) => m.sender_id))].filter(
         (id) => id !== userId && !senderNames[id]
       );
@@ -220,10 +288,28 @@ export default function ChatScreen() {
     setLoadingMore(false);
   }, [loadingMore, hasMore, messages, chatId, userId, senderNames]);
 
+  const trackTyping = useCallback((isTyping: boolean) => {
+    typingChannelRef.current?.track({ displayName: myDisplayName, typing: isTyping });
+  }, [myDisplayName]);
+
+  const handleTextChange = (t: string) => {
+    setText(t);
+    if (t.length > 0) {
+      trackTyping(true);
+      if (stopTypingTimer.current) clearTimeout(stopTypingTimer.current);
+      stopTypingTimer.current = setTimeout(() => trackTyping(false), TYPING_STOP_DELAY);
+    } else {
+      trackTyping(false);
+      if (stopTypingTimer.current) clearTimeout(stopTypingTimer.current);
+    }
+  };
+
   const handleSendText = async () => {
     if (!text.trim() || !userId || !chatId) return;
     const content = text.trim();
     setText('');
+    trackTyping(false);
+    if (stopTypingTimer.current) clearTimeout(stopTypingTimer.current);
     try {
       await sendTextMessage(chatId, userId, content);
     } catch {
@@ -238,9 +324,10 @@ export default function ChatScreen() {
 
   const getReadStatus = (msg: Message): 'sent' | 'read' | undefined => {
     if (msg.sender_id !== userId || chatType !== 'direct' || !otherUserId) return undefined;
-    const readers = readBy[msg.id] ?? [];
-    return readers.includes(otherUserId) ? 'read' : 'sent';
+    return (readBy[msg.id] ?? []).includes(otherUserId) ? 'read' : 'sent';
   };
+
+  const listData = useMemo(() => buildListData(messages), [messages]);
 
   const encryptionStatus = chatType === 'direct' ? 'e2e' : 'in_transit';
 
@@ -275,26 +362,35 @@ export default function ChatScreen() {
       ) : (
         <FlatList
           ref={listRef}
-          data={messages}
+          data={listData}
           inverted
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <MessageBubble
-              type={item.message_type as 'text' | 'audio'}
-              content={item.content}
-              audioUrl={item.audio_url}
-              isOwn={item.sender_id === userId}
-              senderName={
-                chatType === 'group' && item.sender_id !== userId
-                  ? senderNames[item.sender_id]
-                  : undefined
-              }
-              timestamp={item.created_at}
-              encryptionStatus={item.encryption_status as any}
-              autoPlayAudio={item.id === latestAudioId && item.sender_id !== userId}
-              readStatus={getReadStatus(item)}
-            />
-          )}
+          keyExtractor={(item) =>
+            item.type === 'separator' ? item.key : item.data.id
+          }
+          renderItem={({ item }) => {
+            if (item.type === 'separator') {
+              return <DateSeparator date={item.date} />;
+            }
+            const msg = item.data;
+            return (
+              <MessageBubble
+                type={msg.message_type as 'text' | 'audio'}
+                content={msg.content}
+                audioUrl={msg.audio_url}
+                isOwn={msg.sender_id === userId}
+                senderName={
+                  chatType === 'group' && msg.sender_id !== userId
+                    ? senderNames[msg.sender_id]
+                    : undefined
+                }
+                timestamp={msg.created_at}
+                encryptionStatus={msg.encryption_status as any}
+                autoPlayAudio={msg.id === latestAudioId && msg.sender_id !== userId}
+                readStatus={getReadStatus(msg)}
+                isGrouped={item.isGrouped}
+              />
+            );
+          }}
           contentContainerStyle={styles.messageList}
           onEndReached={loadOlderMessages}
           onEndReachedThreshold={0.3}
@@ -308,6 +404,16 @@ export default function ChatScreen() {
             ) : null
           }
         />
+      )}
+
+      {typingUsers.length > 0 && (
+        <View style={styles.typingBar}>
+          <Text style={styles.typingText}>
+            {typingUsers.length === 1
+              ? `${typingUsers[0]} is typing...`
+              : `${typingUsers.slice(0, 2).join(' & ')} are typing...`}
+          </Text>
+        </View>
       )}
 
       <View style={styles.inputBar}>
@@ -326,7 +432,7 @@ export default function ChatScreen() {
               placeholder="Message..."
               placeholderTextColor={colors.textMuted}
               value={text}
-              onChangeText={setText}
+              onChangeText={handleTextChange}
               multiline
               maxLength={2000}
             />
@@ -372,6 +478,18 @@ const styles = StyleSheet.create({
   emptyIcon: { fontSize: 40 },
   messageList: { paddingVertical: spacing.sm },
   loadingMore: { paddingVertical: spacing.md },
+  typingBar: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  typingText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+  },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'center',
