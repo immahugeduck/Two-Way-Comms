@@ -1,6 +1,9 @@
+import nacl from 'tweetnacl';
+import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { supabase } from './supabase';
 import type { Database } from './supabase';
-import { encryptForRecipient, decryptContent } from './encryption';
+import { encryptForRecipient, encryptForGroup, decryptContent } from './encryption';
+import { getPrivateKey } from './keystore';
 
 type Message = Database['public']['Tables']['messages']['Row'];
 
@@ -29,11 +32,11 @@ export async function sendTextMessage(
   plaintext: string,
   expiresAt?: string
 ): Promise<Message> {
-  // Attempt E2E for direct chats
+  // Direct chats: nacl.box E2E. Group chats: nacl.secretbox group E2E (falls back to in_transit).
   const recipientId = await getDirectChatRecipient(chatId, senderId);
   const { content, status } = recipientId
     ? await encryptForRecipient(plaintext, recipientId)
-    : { content: plaintext, status: 'in_transit' as const };
+    : await encryptForGroup(plaintext, chatId);
 
   const { data, error } = await supabase
     .from('messages')
@@ -154,7 +157,7 @@ export async function decryptMessage(msg: Message): Promise<Message> {
   if (msg.message_type !== 'text' || msg.encryption_status !== 'e2e' || !msg.content) {
     return msg;
   }
-  const decrypted = await decryptContent(msg.content, msg.sender_id);
+  const decrypted = await decryptContent(msg.content, msg.sender_id, msg.chat_id);
   return { ...msg, content: decrypted };
 }
 
@@ -229,5 +232,56 @@ export async function createGroupChat(
   const { error: memberError } = await supabase.from('chat_members').insert(memberRows);
   if (memberError) throw memberError;
 
+  // Distribute E2E symmetric key to all members who have public keys (non-fatal)
+  distributeGroupKey(chat.id, creatorId, allMembers).catch(() => {});
+
   return chat.id;
+}
+
+// Generates a 32-byte symmetric key and encrypts it for each member using nacl.box.
+async function distributeGroupKey(
+  chatId: string,
+  creatorId: string,
+  memberIds: string[]
+): Promise<void> {
+  const creatorPrivateKey = await getPrivateKey();
+  if (!creatorPrivateKey) return;
+
+  const creatorPublicKey = nacl.box.keyPair.fromSecretKey(creatorPrivateKey).publicKey;
+  const creatorPublicKeyB64 = encodeBase64(creatorPublicKey);
+
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, public_key')
+    .in('id', memberIds);
+
+  if (!profiles) return;
+
+  const symKey = nacl.randomBytes(nacl.secretbox.keyLength);
+
+  const keyRows: {
+    chat_id: string;
+    user_id: string;
+    encrypted_sym_key: string;
+    key_nonce: string;
+    sender_public_key: string;
+  }[] = [];
+
+  for (const profile of profiles) {
+    if (!profile.public_key) continue;
+    const memberPubKey = decodeBase64(profile.public_key);
+    const nonce = nacl.randomBytes(nacl.box.nonceLength);
+    const encryptedKey = nacl.box(symKey, nonce, memberPubKey, creatorPrivateKey);
+    keyRows.push({
+      chat_id: chatId,
+      user_id: profile.id,
+      encrypted_sym_key: encodeBase64(encryptedKey),
+      key_nonce: encodeBase64(nonce),
+      sender_public_key: creatorPublicKeyB64,
+    });
+  }
+
+  if (keyRows.length > 0) {
+    await supabase.from('group_keys').insert(keyRows);
+  }
 }
