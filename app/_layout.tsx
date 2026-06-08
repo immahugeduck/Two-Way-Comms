@@ -95,6 +95,10 @@ export default function RootLayout() {
           name="chats/new-group"
           options={{ title: 'New Group', headerBackTitle: 'Cancel', presentation: 'modal' }}
         />
+        <Stack.Screen
+          name="profile/edit"
+          options={{ title: 'Edit Profile', headerBackTitle: 'Settings' }}
+        />
       </Stack>
     </GestureHandlerRootView>
   );

@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -48,6 +49,7 @@ export default function SettingsScreen() {
     display_name: string;
     username: string;
     email: string | null;
+    avatar_url: string | null;
   } | null>(null);
   const [settings, setSettings] = useState<PrivacySettings>(DEFAULT_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -76,7 +78,7 @@ export default function SettingsScreen() {
     if (!user) return;
     const { data } = await supabase
       .from('profiles')
-      .select('display_name, username, email')
+      .select('display_name, username, email, avatar_url')
       .eq('id', user.id)
       .single();
     if (data) setProfile(data);
@@ -111,23 +113,34 @@ export default function SettingsScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {profile && (
-        <View style={styles.profileCard}>
-          <View style={styles.profileAvatar}>
-            <Text style={styles.profileInitials}>
-              {profile.display_name
-                .split(' ')
-                .map((w) => w[0])
-                .join('')
-                .toUpperCase()
-                .slice(0, 2)}
-            </Text>
+        <TouchableOpacity
+          style={styles.profileCard}
+          onPress={() => router.push('/profile/edit')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.profileAvatarWrap}>
+            {profile.avatar_url ? (
+              <Image source={{ uri: profile.avatar_url }} style={styles.profileAvatarImg} />
+            ) : (
+              <View style={styles.profileAvatar}>
+                <Text style={styles.profileInitials}>
+                  {profile.display_name
+                    .split(' ')
+                    .map((w) => w[0])
+                    .join('')
+                    .toUpperCase()
+                    .slice(0, 2)}
+                </Text>
+              </View>
+            )}
           </View>
           <Text style={typography.h3}>{profile.display_name}</Text>
           <Text style={typography.bodySmall}>@{profile.username}</Text>
           {profile.email && (
             <Text style={typography.caption}>{profile.email}</Text>
           )}
-        </View>
+          <Text style={styles.editHint}>Tap to edit profile</Text>
+        </TouchableOpacity>
       )}
 
       <Section title="Privacy">
@@ -303,6 +316,14 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     paddingVertical: spacing.xl,
   },
+  profileAvatarWrap: {
+    marginBottom: spacing.sm,
+  },
+  profileAvatarImg: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
   profileAvatar: {
     width: 80,
     height: 80,
@@ -310,9 +331,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.sm,
   },
   profileInitials: { ...typography.h2, color: colors.primary },
+  editHint: {
+    fontSize: 12,
+    color: colors.primary,
+    marginTop: spacing.xs,
+  },
   encryptionInfo: { padding: spacing.md, gap: spacing.sm },
   encryptionNote: { lineHeight: 20 },
   signOutBtn: {
