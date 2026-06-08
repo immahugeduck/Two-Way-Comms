@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import {
@@ -18,6 +19,9 @@ import {
   sendVoiceMessage,
   subscribeToMessages,
   decryptMessage,
+  markMessagesRead,
+  fetchReadReceipts,
+  subscribeToReadReceipts,
 } from '@/lib/messages';
 import MessageBubble from '@/components/MessageBubble';
 import WalkieButton from '@/components/WalkieButton';
@@ -27,24 +31,44 @@ import type { Database } from '@/lib/supabase';
 
 type Message = Database['public']['Tables']['messages']['Row'];
 
+const SETTINGS_KEY = 'twoWay_privacy_settings';
+const PAGE_SIZE = 50;
+
 export default function ChatScreen() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const navigation = useNavigation();
 
+  // Messages stored newest-first for inverted FlatList
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chatType, setChatType] = useState<'direct' | 'group'>('direct');
+  const [otherUserId, setOtherUserId] = useState<string | null>(null);
   const [walkieMode, setWalkieMode] = useState(false);
   const [latestAudioId, setLatestAudioId] = useState<string | null>(null);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
+  // readBy[messageId] = array of userIds who have read it
+  const [readBy, setReadBy] = useState<Record<string, string[]>>({});
+  const [readReceiptsEnabled, setReadReceiptsEnabled] = useState(true);
 
   const listRef = useRef<FlatList>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+    AsyncStorage.getItem(SETTINGS_KEY).then((stored) => {
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (typeof parsed.readReceipts === 'boolean') {
+            setReadReceiptsEnabled(parsed.readReceipts);
+          }
+        } catch {}
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -53,22 +77,31 @@ export default function ChatScreen() {
     loadChatMeta();
     loadMessages();
 
-    const channel = subscribeToMessages(chatId, async (msg) => {
+    const msgChannel = subscribeToMessages(chatId, async (msg) => {
       const decrypted = await decryptMessage(msg);
-      setMessages((prev) => [...prev, decrypted]);
+      setMessages((prev) => [decrypted, ...prev]);
       if (msg.message_type === 'audio') setLatestAudioId(msg.id);
-      // Fetch sender name if we don't have it yet
       if (msg.sender_id !== userId && !senderNames[msg.sender_id]) {
         fetchSenderName(msg.sender_id);
       }
+      // Mark incoming message as read immediately if setting is on
+      if (msg.sender_id !== userId && readReceiptsEnabled) {
+        markMessagesRead([msg.id], userId, chatId);
+      }
     });
 
-    return () => { supabase.removeChannel(channel); };
-  }, [userId, chatId]);
+    const readsChannel = subscribeToReadReceipts(chatId, (messageId, readerId) => {
+      setReadBy((prev) => ({
+        ...prev,
+        [messageId]: [...(prev[messageId] ?? []), readerId],
+      }));
+    });
 
-  useEffect(() => {
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-  }, [messages.length]);
+    return () => {
+      supabase.removeChannel(msgChannel);
+      supabase.removeChannel(readsChannel);
+    };
+  }, [userId, chatId, readReceiptsEnabled]);
 
   const fetchSenderName = async (uid: string) => {
     const { data } = await supabase
@@ -101,17 +134,42 @@ export default function ChatScreen() {
       .neq('user_id', userId!)
       .limit(1);
 
-    const name = (members?.[0]?.profiles as any)?.display_name;
-    if (name) navigation.setOptions({ title: name });
+    const other = members?.[0];
+    if (other) {
+      setOtherUserId(other.user_id);
+      const name = (other.profiles as any)?.display_name;
+      if (name) navigation.setOptions({ title: name });
+    }
   };
 
   const loadMessages = async () => {
     try {
-      const raw = await fetchMessages(chatId);
+      const [raw, reads] = await Promise.all([
+        fetchMessages(chatId),
+        fetchReadReceipts(chatId),
+      ]);
+
       const decrypted = await Promise.all(raw.map(decryptMessage));
       setMessages(decrypted);
+      setHasMore(raw.length === PAGE_SIZE);
 
-      // Build sender name map for all non-self senders
+      // Seed readBy map
+      const readMap: Record<string, string[]> = {};
+      for (const r of reads) {
+        if (!readMap[r.message_id]) readMap[r.message_id] = [];
+        readMap[r.message_id].push(r.user_id);
+      }
+      setReadBy(readMap);
+
+      // Batch-mark all other-sender messages as read
+      if (readReceiptsEnabled) {
+        const unread = raw
+          .filter((m) => m.sender_id !== userId)
+          .map((m) => m.id);
+        if (unread.length) markMessagesRead(unread, userId!, chatId);
+      }
+
+      // Build sender name map
       const otherIds = [...new Set(raw.map((m) => m.sender_id).filter((id) => id !== userId))];
       if (otherIds.length) {
         const { data } = await supabase
@@ -123,14 +181,44 @@ export default function ChatScreen() {
         }
       }
 
-      const lastAudio = [...decrypted].reverse().find((m) => m.message_type === 'audio');
-      if (lastAudio) setLatestAudioId(lastAudio.id);
-    } catch (e: any) {
+      const firstAudio = decrypted.find((m) => m.message_type === 'audio');
+      if (firstAudio) setLatestAudioId(firstAudio.id);
+    } catch {
       setError('Failed to load messages');
     } finally {
       setLoading(false);
     }
   };
+
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingMore || !hasMore || messages.length === 0) return;
+    const oldest = messages[messages.length - 1];
+    setLoadingMore(true);
+    try {
+      const raw = await fetchMessages(chatId, { before: oldest.created_at });
+      const decrypted = await Promise.all(raw.map(decryptMessage));
+      setMessages((prev) => [...prev, ...decrypted]);
+      setHasMore(raw.length === PAGE_SIZE);
+
+      // Fetch sender names for any new senders
+      const newIds = [...new Set(raw.map((m) => m.sender_id))].filter(
+        (id) => id !== userId && !senderNames[id]
+      );
+      if (newIds.length) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, display_name')
+          .in('id', newIds);
+        if (data) {
+          setSenderNames((prev) => ({
+            ...prev,
+            ...Object.fromEntries(data.map((p) => [p.id, p.display_name])),
+          }));
+        }
+      }
+    } catch {}
+    setLoadingMore(false);
+  }, [loadingMore, hasMore, messages, chatId, userId, senderNames]);
 
   const handleSendText = async () => {
     if (!text.trim() || !userId || !chatId) return;
@@ -147,6 +235,12 @@ export default function ChatScreen() {
     if (!userId || !chatId) return;
     await sendVoiceMessage(chatId, userId, audioUrl);
   }, [userId, chatId]);
+
+  const getReadStatus = (msg: Message): 'sent' | 'read' | undefined => {
+    if (msg.sender_id !== userId || chatType !== 'direct' || !otherUserId) return undefined;
+    const readers = readBy[msg.id] ?? [];
+    return readers.includes(otherUserId) ? 'read' : 'sent';
+  };
 
   const encryptionStatus = chatType === 'direct' ? 'e2e' : 'in_transit';
 
@@ -182,6 +276,7 @@ export default function ChatScreen() {
         <FlatList
           ref={listRef}
           data={messages}
+          inverted
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <MessageBubble
@@ -197,10 +292,21 @@ export default function ChatScreen() {
               timestamp={item.created_at}
               encryptionStatus={item.encryption_status as any}
               autoPlayAudio={item.id === latestAudioId && item.sender_id !== userId}
+              readStatus={getReadStatus(item)}
             />
           )}
           contentContainerStyle={styles.messageList}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          onEndReached={loadOlderMessages}
+          onEndReachedThreshold={0.3}
+          ListFooterComponent={
+            loadingMore ? (
+              <ActivityIndicator
+                size="small"
+                color={colors.textMuted}
+                style={styles.loadingMore}
+              />
+            ) : null
+          }
         />
       )}
 
@@ -265,6 +371,7 @@ const styles = StyleSheet.create({
   },
   emptyIcon: { fontSize: 40 },
   messageList: { paddingVertical: spacing.sm },
+  loadingMore: { paddingVertical: spacing.md },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'center',
