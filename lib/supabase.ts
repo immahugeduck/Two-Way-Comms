@@ -46,6 +46,7 @@ export type Database = {
         Row: {
           id: string;
           type: 'direct' | 'group';
+          encryption_mode: 'standard' | 'e2e';
           group_name: string | null;
           group_avatar_url: string | null;
           created_at: string;
