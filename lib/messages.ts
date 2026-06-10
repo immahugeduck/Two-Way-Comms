@@ -30,13 +30,20 @@ export async function sendTextMessage(
   chatId: string,
   senderId: string,
   plaintext: string,
-  expiresAt?: string
+  expiresAt?: string,
+  encryptionMode: 'standard' | 'e2e' = 'standard'
 ): Promise<Message> {
-  // Direct chats: nacl.box E2E. Group chats: nacl.secretbox group E2E (falls back to in_transit).
-  const recipientId = await getDirectChatRecipient(chatId, senderId);
-  const { content, status } = recipientId
-    ? await encryptForRecipient(plaintext, recipientId)
-    : await encryptForGroup(plaintext, chatId);
+  let content = plaintext;
+  let status: 'none' | 'in_transit' | 'e2e' = 'in_transit';
+
+  if (encryptionMode === 'e2e') {
+    const recipientId = await getDirectChatRecipient(chatId, senderId);
+    const result = recipientId
+      ? await encryptForRecipient(plaintext, recipientId)
+      : await encryptForGroup(plaintext, chatId);
+    content = result.content;
+    status = result.status;
+  }
 
   const { data, error } = await supabase
     .from('messages')
@@ -53,7 +60,7 @@ export async function sendTextMessage(
     .single();
 
   if (error) throw error;
-  return data;
+  return data!;
 }
 
 export async function sendVoiceMessage(
@@ -182,18 +189,20 @@ export function subscribeToMessages(
 
 export async function getOrCreateDirectChat(
   userA: string,
-  userB: string
+  userB: string,
+  mode: 'standard' | 'e2e' = 'standard'
 ): Promise<string> {
   const { data: existing } = await supabase.rpc('get_direct_chat', {
     user_a: userA,
     user_b: userB,
+    mode,
   });
 
   if (existing) return existing as string;
 
   const { data: chat, error: chatError } = await supabase
     .from('chats')
-    .insert({ type: 'direct' })
+    .insert({ type: 'direct', encryption_mode: mode })
     .select()
     .single();
 
@@ -216,7 +225,7 @@ export async function createGroupChat(
 ): Promise<string> {
   const { data: chat, error: chatError } = await supabase
     .from('chats')
-    .insert({ type: 'group', group_name: groupName })
+    .insert({ type: 'group', group_name: groupName, encryption_mode: 'e2e' })
     .select()
     .single();
 

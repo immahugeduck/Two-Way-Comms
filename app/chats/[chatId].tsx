@@ -9,9 +9,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import {
   fetchMessages,
@@ -22,6 +23,7 @@ import {
   markMessagesRead,
   fetchReadReceipts,
   subscribeToReadReceipts,
+  getOrCreateDirectChat,
 } from '@/lib/messages';
 import { getGroupSymKey } from '@/lib/encryption';
 import MessageBubble from '@/components/MessageBubble';
@@ -74,6 +76,7 @@ function buildListData(messages: Message[]): ListItem[] {
 export default function ChatScreen() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const navigation = useNavigation();
+  const router = useRouter();
 
   // Messages stored newest-first for inverted FlatList
   const [messages, setMessages] = useState<Message[]>([]);
@@ -85,6 +88,7 @@ export default function ChatScreen() {
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chatType, setChatType] = useState<'direct' | 'group'>('direct');
+  const [encryptionMode, setEncryptionMode] = useState<'standard' | 'e2e'>('standard');
   const [groupE2E, setGroupE2E] = useState(false);
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
   const [walkieMode, setWalkieMode] = useState(false);
@@ -191,14 +195,16 @@ export default function ChatScreen() {
   const loadChatMeta = async () => {
     const { data: chat } = await supabase
       .from('chats')
-      .select('type, group_name')
+      .select('type, group_name, encryption_mode')
       .eq('id', chatId)
       .single();
 
-    if (chat?.type === 'group' && chat.group_name) {
+    if (!chat) return;
+    setEncryptionMode((chat.encryption_mode as 'standard' | 'e2e') ?? 'standard');
+
+    if (chat.type === 'group') {
       setChatType('group');
-      navigation.setOptions({ title: chat.group_name });
-      // Check whether the current user has a group E2E key
+      if (chat.group_name) navigation.setOptions({ title: chat.group_name });
       getGroupSymKey(chatId).then((key) => setGroupE2E(!!key));
       return;
     }
@@ -216,6 +222,26 @@ export default function ChatScreen() {
       const name = (other.profiles as any)?.display_name;
       if (name) navigation.setOptions({ title: name });
     }
+  };
+
+  const handleGoEncrypted = async () => {
+    if (!userId || !otherUserId) return;
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('public_key')
+      .eq('id', otherUserId)
+      .single();
+
+    if (!profile?.public_key) {
+      Alert.alert(
+        'E2E Not Available',
+        'This contact hasn\'t set up end-to-end encryption yet. They need to open the app at least once after the latest update.'
+      );
+      return;
+    }
+
+    const e2eChatId = await getOrCreateDirectChat(userId, otherUserId, 'e2e');
+    router.replace(`/chats/${e2eChatId}`);
   };
 
   const loadMessages = async () => {
@@ -315,7 +341,8 @@ export default function ChatScreen() {
     trackTyping(false);
     if (stopTypingTimer.current) clearTimeout(stopTypingTimer.current);
     try {
-      await sendTextMessage(chatId, userId, content);
+      const mode = chatType === 'group' ? 'e2e' : encryptionMode;
+      await sendTextMessage(chatId, userId, content, undefined, mode);
     } catch {
       setError('Failed to send message');
     }
@@ -333,7 +360,9 @@ export default function ChatScreen() {
 
   const listData = useMemo(() => buildListData(messages), [messages]);
 
-  const encryptionStatus = chatType === 'direct' || groupE2E ? 'e2e' : 'in_transit';
+  const encryptionStatus =
+    encryptionMode === 'e2e' ? 'e2e' :
+    (chatType === 'group' && groupE2E) ? 'e2e' : 'in_transit';
 
   return (
     <KeyboardAvoidingView
@@ -343,6 +372,11 @@ export default function ChatScreen() {
     >
       <View style={styles.privacyBar}>
         <PrivacyBadge status={encryptionStatus as any} />
+        {chatType === 'direct' && encryptionMode === 'standard' && (
+          <TouchableOpacity style={styles.goEncryptedBtn} onPress={handleGoEncrypted}>
+            <Text style={styles.goEncryptedText}>🔒 Go Encrypted</Text>
+          </TouchableOpacity>
+        )}
         {chatType === 'group' && !groupE2E && (
           <Text style={styles.groupEncNote}>Group key pending — messages in transit</Text>
         )}
@@ -470,6 +504,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textMuted,
     fontStyle: 'italic',
+  },
+  goEncryptedBtn: {
+    marginLeft: 'auto',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  goEncryptedText: {
+    fontSize: 11,
+    color: colors.primary,
+    fontWeight: '600',
   },
   loader: { marginTop: spacing.xxl },
   empty: {
