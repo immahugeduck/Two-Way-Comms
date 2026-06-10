@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { getOrCreateDirectChat } from '@/lib/messages';
 import ContactCard from '@/components/ContactCard';
 import { colors, spacing, radius, typography } from '@/constants/theme';
 
@@ -28,6 +27,7 @@ export default function ContactsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [searchTab, setSearchTab] = useState<'name' | 'phone'>('name');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Contact[]>([]);
   const [searching, setSearching] = useState(false);
@@ -55,15 +55,30 @@ export default function ContactsScreen() {
   const searchUsers = async () => {
     if (!searchQuery.trim()) return;
     setSearching(true);
-    const q = searchQuery.trim().toLowerCase();
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, display_name, username, avatar_url')
-      .or(`username.ilike.%${q}%,email.ilike.%${q}%`)
-      .neq('id', userId!)
-      .limit(10);
 
-    setSearchResults(data ?? []);
+    let data: Contact[] | null = null;
+
+    if (searchTab === 'phone') {
+      const normalized = searchQuery.trim().replace(/[\s\-()]/g, '');
+      const { data: rows } = await supabase
+        .from('profiles')
+        .select('id, display_name, username, avatar_url')
+        .eq('phone', normalized)
+        .neq('id', userId!)
+        .limit(5);
+      data = rows ?? [];
+    } else {
+      const q = searchQuery.trim().toLowerCase();
+      const { data: rows } = await supabase
+        .from('profiles')
+        .select('id, display_name, username, avatar_url')
+        .or(`username.ilike.%${q}%,email.ilike.%${q}%`)
+        .neq('id', userId!)
+        .limit(10);
+      data = rows ?? [];
+    }
+
+    setSearchResults(data);
     setSearching(false);
   };
 
@@ -82,12 +97,6 @@ export default function ContactsScreen() {
     setSearchQuery('');
     setSearchResults([]);
     fetchContacts();
-  };
-
-  const openChat = async (contact: Contact) => {
-    if (!userId) return;
-    const chatId = await getOrCreateDirectChat(userId, contact.id);
-    router.push(`/chats/${chatId}`);
   };
 
   return (
@@ -109,7 +118,7 @@ export default function ContactsScreen() {
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>👥</Text>
           <Text style={[typography.h3, styles.emptyTitle]}>No contacts yet</Text>
-          <Text style={typography.bodySmall}>Add friends by username or email.</Text>
+          <Text style={typography.bodySmall}>Add friends by username, email, or phone number.</Text>
         </View>
       ) : (
         <FlatList
@@ -121,7 +130,7 @@ export default function ContactsScreen() {
               displayName={item.display_name}
               username={item.username}
               avatarUrl={item.avatar_url}
-              onPress={() => openChat(item)}
+              onPress={() => router.push(`/profile/${item.id}`)}
               onWalkiePress={() => router.push('/(tabs)/walkie')}
             />
           )}
@@ -132,19 +141,40 @@ export default function ContactsScreen() {
         <View style={styles.modal}>
           <View style={styles.modalHeader}>
             <Text style={[typography.h3]}>Add Contact</Text>
-            <TouchableOpacity onPress={() => { setShowAdd(false); setSearchResults([]); }}>
+            <TouchableOpacity onPress={() => { setShowAdd(false); setSearchResults([]); setSearchQuery(''); }}>
               <Text style={styles.closeBtn}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Search type tabs */}
+          <View style={styles.tabRow}>
+            <TouchableOpacity
+              style={[styles.tab, searchTab === 'name' && styles.tabActive]}
+              onPress={() => { setSearchTab('name'); setSearchQuery(''); setSearchResults([]); }}
+            >
+              <Text style={[styles.tabText, searchTab === 'name' && styles.tabTextActive]}>
+                Username / Email
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, searchTab === 'phone' && styles.tabActive]}
+              onPress={() => { setSearchTab('phone'); setSearchQuery(''); setSearchResults([]); }}
+            >
+              <Text style={[styles.tabText, searchTab === 'phone' && styles.tabTextActive]}>
+                Phone Number
+              </Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.searchRow}>
             <TextInput
               style={styles.searchInput}
-              placeholder="Search by username or email..."
+              placeholder={searchTab === 'phone' ? '+12025551234' : 'Search by username or email...'}
               placeholderTextColor={colors.textMuted}
               value={searchQuery}
               onChangeText={setSearchQuery}
               autoCapitalize="none"
+              keyboardType={searchTab === 'phone' ? 'phone-pad' : 'default'}
               onSubmitEditing={searchUsers}
               returnKeyType="search"
             />
@@ -233,6 +263,23 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   closeBtn: { color: colors.textSecondary, fontSize: 20, padding: spacing.sm },
+  tabRow: {
+    flexDirection: 'row',
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: radius.md,
+    padding: 3,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: spacing.xs,
+    alignItems: 'center',
+    borderRadius: radius.sm,
+  },
+  tabActive: { backgroundColor: colors.surface },
+  tabText: { fontSize: 13, color: colors.textMuted, fontWeight: '500' },
+  tabTextActive: { color: colors.textPrimary, fontWeight: '700' },
   searchRow: {
     flexDirection: 'row',
     gap: spacing.sm,
