@@ -14,6 +14,7 @@ import { colors, spacing, radius, typography } from '@/constants/theme';
 interface ChatPreview {
   id: string;
   chatType: 'direct' | 'group';
+  encryptionMode: 'standard' | 'e2e';
   name: string;
   subtitle: string;
   lastMessage: string | null;
@@ -59,7 +60,7 @@ export default function ChatsScreen() {
     for (const chatId of chatIds) {
       const { data: chat } = await supabase
         .from('chats')
-        .select('type, group_name')
+        .select('type, group_name, encryption_mode')
         .eq('id', chatId)
         .single();
 
@@ -100,6 +101,7 @@ export default function ChatsScreen() {
       previews.push({
         id: chatId,
         chatType: chat?.type ?? 'direct',
+        encryptionMode: (chat?.encryption_mode as 'standard' | 'e2e') ?? 'standard',
         name,
         subtitle,
         lastMessage: previewContent,
@@ -160,6 +162,9 @@ export default function ChatsScreen() {
           <Text style={[typography.caption, styles.time]}>{time}</Text>
           {item.chatType === 'group' && (
             <Text style={styles.groupBadge}>Group</Text>
+          )}
+          {item.encryptionMode === 'e2e' && (
+            <Text style={styles.lockBadge}>🔒 E2E</Text>
           )}
         </View>
       </TouchableOpacity>
@@ -257,5 +262,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     fontWeight: '600',
     overflow: 'hidden',
+  },
+  lockBadge: {
+    fontSize: 10,
+    color: colors.primary,
+    fontWeight: '600',
   },
 });
