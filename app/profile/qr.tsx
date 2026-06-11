@@ -100,7 +100,7 @@ export default function MyQRScreen() {
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.scanBtn} onPress={() => router.push('/profile/scan')}>
-        <Text style={styles.scanBtnText}>📷  Scan Someone's Code</Text>
+        <Text style={styles.scanBtnText}>📷  Scan Someone&apos;s Code</Text>
       </TouchableOpacity>
     </View>
   );

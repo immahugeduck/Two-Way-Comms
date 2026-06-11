@@ -47,7 +47,7 @@ export async function encryptForRecipient(
   }
 
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  const encrypted = nacl.box(encodeUTF8(plaintext), nonce, recipientPublicKey, privateKey);
+  const encrypted = nacl.box(decodeUTF8(plaintext), nonce, recipientPublicKey, privateKey);
 
   const payload: E2EPayload = {
     e2e: true,
@@ -98,7 +98,7 @@ export async function encryptForGroup(
   if (!symKey) return { content: plaintext, status: 'in_transit' };
 
   const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-  const encrypted = nacl.secretbox(encodeUTF8(plaintext), nonce, symKey);
+  const encrypted = nacl.secretbox(decodeUTF8(plaintext), nonce, symKey);
 
   const payload: GroupE2EPayload = {
     e2e: true,
@@ -146,7 +146,7 @@ export async function decryptContent(
     );
 
     if (!decrypted) return '[Could not decrypt message]';
-    return decodeUTF8(decrypted);
+    return encodeUTF8(decrypted);
   }
 
   // Direct message: box decrypt
@@ -165,5 +165,5 @@ export async function decryptContent(
   );
 
   if (!decrypted) return '[Could not decrypt message]';
-  return decodeUTF8(decrypted);
+  return encodeUTF8(decrypted);
 }

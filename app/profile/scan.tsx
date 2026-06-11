@@ -193,7 +193,7 @@ export default function ScanQRScreen() {
               <Text style={styles.notFoundIcon}>🔍</Text>
               <Text style={[typography.h3, styles.notFoundTitle]}>User Not Found</Text>
               <Text style={[typography.bodySmall, styles.notFoundText]}>
-                This QR code doesn't match any 2Way user.
+                This QR code doesn&apos;t match any 2Way user.
               </Text>
               <TouchableOpacity style={styles.retryBtn} onPress={resetScan}>
                 <Text style={styles.retryBtnText}>Try Again</Text>

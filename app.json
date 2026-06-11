@@ -4,10 +4,10 @@
     "slug": "2way-secure-walkie",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#0A0A0A"
     },
@@ -22,7 +22,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#0A0A0A"
       },
       "package": "com.twoway.securechat",
@@ -34,16 +34,10 @@
         "VIBRATE"
       ]
     },
-    "notification": {
-      "icon": "./assets/notification-icon.png",
-      "color": "#00D4AA",
-      "androidMode": "default",
-      "androidCollapsedTitle": "#{unread_notifications} new messages"
-    },
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/logo.png"
     },
     "plugins": [
       "expo-router",
@@ -57,14 +51,15 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/notification-icon.png",
+          "icon": "./assets/logo.png",
           "color": "#00D4AA",
           "sounds": [],
           "androidMode": "default",
           "androidCollapsedTitle": "#{unread_notifications} new messages",
           "iosDisplayInForeground": true
         }
-      ]
+      ],
+      "expo-font"
     ],
     "scheme": "twoway",
     "experiments": {

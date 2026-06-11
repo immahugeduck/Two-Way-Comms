@@ -81,7 +81,7 @@ export function addNotificationResponseReceivedListener(
 }
 
 export function removeSubscription(subscription: Notifications.Subscription): void {
-  Notifications.removeNotificationSubscription(subscription);
+  subscription.remove();
 }
 
 export async function getBadgeCount(): Promise<number> {
