@@ -1,5 +1,5 @@
 import { Audio, AVPlaybackStatus } from 'expo-av';
-import * as FileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
 import { supabase } from './supabase';
 
 let activeRecording: Audio.Recording | null = null;
@@ -55,7 +55,7 @@ export async function cancelRecording(): Promise<void> {
 
   // Delete the temp file
   if (uri) {
-    try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch {}
+    try { new File(uri).delete(); } catch {}
   }
   await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
 }
@@ -65,8 +65,8 @@ export async function uploadAudio(
   chatId: string
 ): Promise<string | null> {
   const fileName = `${chatId}/${Date.now()}.m4a`;
-  const fileInfo = await FileSystem.getInfoAsync(localUri);
-  if (!fileInfo.exists) return null;
+  const file = new File(localUri);
+  if (!file.exists) return null;
 
   const response = await fetch(localUri);
   const blob = await response.blob();
@@ -82,7 +82,7 @@ export async function uploadAudio(
     .getPublicUrl(data.path);
 
   // Clean up local temp file
-  try { await FileSystem.deleteAsync(localUri, { idempotent: true }); } catch {}
+  try { file.delete(); } catch {}
 
   return publicUrlData.publicUrl;
 }
