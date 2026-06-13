@@ -41,14 +41,14 @@ export default function SignupScreen() {
       return;
     }
 
-    const { error: profileError } = await supabase.from('profiles').insert({
+    const { error: profileError } = await supabase.from('profiles').upsert({
       id: data.user.id,
       email,
       username: username.toLowerCase().replace(/\s/g, ''),
       display_name: displayName,
       avatar_url: null,
       phone: null,
-    });
+    }, { onConflict: 'id' });
 
     setLoading(false);
 

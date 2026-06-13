@@ -111,6 +111,10 @@ export default function RootLayout() {
           name="profile/[userId]"
           options={{ title: 'Profile', headerBackTitle: 'Back' }}
         />
+        <Stack.Screen
+          name="contacts/find-friends"
+          options={{ title: 'Find Friends', headerBackTitle: 'Contacts' }}
+        />
       </Stack>
     </GestureHandlerRootView>
   );

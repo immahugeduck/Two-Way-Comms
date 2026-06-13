@@ -59,23 +59,39 @@ export default function ContactsScreen() {
     let data: Contact[] | null = null;
 
     if (searchTab === 'phone') {
-      const normalized = searchQuery.trim().replace(/[\s\-()]/g, '');
+      const normalized = searchQuery.trim().replace(/[\s\-()+]/g, '');
+      // Try exact match with and without leading +
+      const variants = [`+${normalized}`, normalized];
       const { data: rows } = await supabase
         .from('profiles')
         .select('id, display_name, username, avatar_url')
-        .eq('phone', normalized)
+        .in('phone', variants)
         .neq('id', userId!)
         .limit(5);
       data = rows ?? [];
     } else {
       const q = searchQuery.trim().toLowerCase();
-      const { data: rows } = await supabase
-        .from('profiles')
-        .select('id, display_name, username, avatar_url')
-        .or(`username.ilike.%${q}%,email.ilike.%${q}%`)
-        .neq('id', userId!)
-        .limit(10);
-      data = rows ?? [];
+      // Two separate ilike queries to avoid encoding issues with .or()
+      const [{ data: byUsername }, { data: byEmail }] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id, display_name, username, avatar_url')
+          .ilike('username', `%${q}%`)
+          .neq('id', userId!)
+          .limit(8),
+        supabase
+          .from('profiles')
+          .select('id, display_name, username, avatar_url')
+          .ilike('email', `%${q}%`)
+          .neq('id', userId!)
+          .limit(8),
+      ]);
+      const seen = new Set<string>();
+      const merged: Contact[] = [];
+      for (const row of [...(byUsername ?? []), ...(byEmail ?? [])]) {
+        if (!seen.has(row.id)) { seen.add(row.id); merged.push(row); }
+      }
+      data = merged;
     }
 
     setSearchResults(data);
@@ -113,6 +129,10 @@ export default function ContactsScreen() {
           <Text style={styles.qrBtnText}>📷  Scan QR</Text>
         </TouchableOpacity>
       </View>
+
+      <TouchableOpacity style={styles.findFriendsBtn} onPress={() => router.push('/contacts/find-friends')}>
+        <Text style={styles.findFriendsBtnText}>👥  Find Friends from Contacts</Text>
+      </TouchableOpacity>
 
       {contacts.length === 0 ? (
         <View style={styles.empty}>
@@ -241,6 +261,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   qrBtnText: { color: colors.textSecondary, fontSize: 14 },
+  findFriendsBtn: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+  },
+  findFriendsBtnText: { color: colors.textSecondary, fontSize: 14 },
   empty: {
     flex: 1,
     alignItems: 'center',

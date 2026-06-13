@@ -17,7 +17,8 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "2Way needs microphone access for push-to-talk voice messages.",
         "NSCameraUsageDescription": "2Way needs camera access to set your profile photo.",
-        "NSPhotoLibraryUsageDescription": "2Way needs photo library access to set your profile photo."
+        "NSPhotoLibraryUsageDescription": "2Way needs photo library access to set your profile photo.",
+        "NSContactsUsageDescription": "2Way uses your contacts to help you find friends who are already on the app."
       }
     },
     "android": {
@@ -31,7 +32,8 @@
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
         "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "VIBRATE",
+        "READ_CONTACTS"
       ]
     },
     "notification": {
