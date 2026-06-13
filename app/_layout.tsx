@@ -107,6 +107,10 @@ export default function RootLayout() {
           name="profile/scan"
           options={{ headerShown: false }}
         />
+        <Stack.Screen
+          name="profile/[userId]"
+          options={{ title: 'Profile', headerBackTitle: 'Back' }}
+        />
       </Stack>
     </GestureHandlerRootView>
   );

@@ -21,6 +21,10 @@ export default function EditProfileScreen() {
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [phone, setPhone] = useState<string | null>(null);
+  const [phoneInput, setPhoneInput] = useState('');
+  const [phoneOtp, setPhoneOtp] = useState('');
+  const [phoneStep, setPhoneStep] = useState<'idle' | 'enter' | 'sending' | 'verify' | 'verifying'>('idle');
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -34,13 +38,14 @@ export default function EditProfileScreen() {
     setUserId(user.id);
     const { data } = await supabase
       .from('profiles')
-      .select('display_name, username, avatar_url')
+      .select('display_name, username, avatar_url, phone')
       .eq('id', user.id)
       .single();
     if (data) {
       setDisplayName(data.display_name);
       setUsername(data.username);
       setAvatarUrl(data.avatar_url);
+      setPhone(data.phone ?? null);
     }
   };
 
@@ -97,6 +102,43 @@ export default function EditProfileScreen() {
     } finally {
       setUploading(false);
     }
+  };
+
+  const sendPhoneOtp = async () => {
+    const normalized = phoneInput.replace(/[\s\-()]/g, '');
+    if (!normalized.startsWith('+') || normalized.length < 8) {
+      Alert.alert('Invalid Format', 'Use international format: +12025551234');
+      return;
+    }
+    setPhoneStep('sending');
+    const { error } = await supabase.auth.updateUser({ phone: normalized });
+    if (error) {
+      Alert.alert('Error', error.message);
+      setPhoneStep('enter');
+      return;
+    }
+    setPhoneInput(normalized);
+    setPhoneStep('verify');
+  };
+
+  const verifyPhoneOtp = async () => {
+    if (!phoneOtp.trim() || !userId) return;
+    setPhoneStep('verifying');
+    const { error } = await supabase.auth.verifyOtp({
+      phone: phoneInput,
+      token: phoneOtp.trim(),
+      type: 'phone_change',
+    });
+    if (error) {
+      Alert.alert('Verification Failed', error.message);
+      setPhoneStep('verify');
+      return;
+    }
+    await supabase.from('profiles').update({ phone: phoneInput }).eq('id', userId);
+    setPhone(phoneInput);
+    setPhoneOtp('');
+    setPhoneStep('idle');
+    Alert.alert('Verified!', 'Phone number added to your profile.');
   };
 
   const handleSave = async () => {
@@ -183,6 +225,85 @@ export default function EditProfileScreen() {
           />
           <Text style={styles.fieldHint}>Letters, numbers, and underscores only</Text>
         </View>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.label}>PHONE NUMBER</Text>
+
+          {phoneStep === 'idle' && (
+            phone ? (
+              <View style={styles.phoneVerifiedRow}>
+                <Text style={styles.phoneVerifiedText}>{phone} ✓</Text>
+                <TouchableOpacity onPress={() => { setPhoneInput(phone); setPhoneStep('enter'); }}>
+                  <Text style={styles.phoneLinkText}>Change</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.addPhoneBtn} onPress={() => setPhoneStep('enter')}>
+                <Text style={styles.addPhoneBtnText}>+ Add Phone Number</Text>
+              </TouchableOpacity>
+            )
+          )}
+
+          {(phoneStep === 'enter' || phoneStep === 'sending') && (
+            <>
+              <TextInput
+                style={styles.input}
+                value={phoneInput}
+                onChangeText={setPhoneInput}
+                placeholder="+12025551234"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="phone-pad"
+                autoCorrect={false}
+              />
+              <Text style={styles.fieldHint}>International format: +[country code][number]</Text>
+              <TouchableOpacity
+                style={[styles.otpBtn, phoneStep === 'sending' && styles.btnDisabled]}
+                onPress={sendPhoneOtp}
+                disabled={phoneStep === 'sending'}
+              >
+                {phoneStep === 'sending' ? (
+                  <ActivityIndicator color={colors.background} size="small" />
+                ) : (
+                  <Text style={styles.otpBtnText}>Send Verification Code</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setPhoneStep('idle')}>
+                <Text style={styles.phoneLinkText}>Cancel</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {(phoneStep === 'verify' || phoneStep === 'verifying') && (
+            <>
+              <Text style={[typography.bodySmall, styles.otpHint]}>
+                Enter the 6-digit code sent to {phoneInput}
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={phoneOtp}
+                onChangeText={setPhoneOtp}
+                placeholder="000000"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+              <TouchableOpacity
+                style={[styles.otpBtn, phoneStep === 'verifying' && styles.btnDisabled]}
+                onPress={verifyPhoneOtp}
+                disabled={phoneStep === 'verifying'}
+              >
+                {phoneStep === 'verifying' ? (
+                  <ActivityIndicator color={colors.background} size="small" />
+                ) : (
+                  <Text style={styles.otpBtnText}>Verify Code</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setPhoneStep('enter')}>
+                <Text style={styles.phoneLinkText}>Change number</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
       </View>
 
       <TouchableOpacity
@@ -260,6 +381,37 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     paddingHorizontal: spacing.xs,
   },
+  phoneVerifiedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  phoneVerifiedText: { color: colors.primary, fontSize: 15 },
+  phoneLinkText: { color: colors.primary, fontSize: 13, fontWeight: '600' },
+  addPhoneBtn: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  addPhoneBtnText: { color: colors.textSecondary, fontSize: 15 },
+  otpBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  otpBtnText: { color: colors.background, fontWeight: '700', fontSize: 15 },
+  btnDisabled: { opacity: 0.6 },
+  otpHint: { color: colors.textMuted, textAlign: 'center' },
   saveBtn: {
     backgroundColor: colors.primary,
     borderRadius: radius.md,
