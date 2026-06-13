@@ -56,26 +56,40 @@ export default function ContactsScreen() {
     if (!searchQuery.trim()) return;
     setSearching(true);
 
-    let data: Contact[] | null = null;
+    let data: Contact[] = [];
 
     if (searchTab === 'phone') {
-      const normalized = searchQuery.trim().replace(/[\s\-()]/g, '');
-      const { data: rows } = await supabase
-        .from('profiles')
-        .select('id, display_name, username, avatar_url')
-        .eq('phone', normalized)
-        .neq('id', userId!)
-        .limit(5);
-      data = rows ?? [];
+      const raw = searchQuery.trim().replace(/[\s\-()]/g, '');
+      const variants = new Set<string>();
+      variants.add(raw);
+      const digits = raw.replace(/^\+/, '');
+      if (digits.length === 10) { variants.add(`+1${digits}`); variants.add(digits); }
+      if (digits.length === 11 && digits.startsWith('1')) { variants.add(`+${digits}`); variants.add(digits.slice(1)); }
+
+      const results = await Promise.all(
+        [...variants].map((v) =>
+          supabase.from('profiles').select('id, display_name, username, avatar_url')
+            .eq('phone', v).neq('id', userId!).limit(5)
+        )
+      );
+      const seen = new Set<string>();
+      for (const { data: rows } of results) {
+        for (const r of rows ?? []) {
+          if (!seen.has(r.id)) { seen.add(r.id); data.push(r); }
+        }
+      }
     } else {
-      const q = searchQuery.trim().toLowerCase();
-      const { data: rows } = await supabase
-        .from('profiles')
-        .select('id, display_name, username, avatar_url')
-        .or(`username.ilike.%${q}%,email.ilike.%${q}%`)
-        .neq('id', userId!)
-        .limit(10);
-      data = rows ?? [];
+      const q = searchQuery.trim();
+      const [{ data: byUsername }, { data: byEmail }] = await Promise.all([
+        supabase.from('profiles').select('id, display_name, username, avatar_url')
+          .ilike('username', `%${q}%`).neq('id', userId!).limit(8),
+        supabase.from('profiles').select('id, display_name, username, avatar_url')
+          .ilike('email', `%${q}%`).neq('id', userId!).limit(8),
+      ]);
+      const seen = new Set<string>();
+      for (const r of [...(byUsername ?? []), ...(byEmail ?? [])]) {
+        if (!seen.has(r.id)) { seen.add(r.id); data.push(r); }
+      }
     }
 
     setSearchResults(data);
@@ -114,6 +128,10 @@ export default function ContactsScreen() {
         </TouchableOpacity>
       </View>
 
+      <TouchableOpacity style={styles.findFriendsBtn} onPress={() => router.push('/contacts/find-friends')}>
+        <Text style={styles.findFriendsBtnText}>👥  Find Friends from Contacts</Text>
+      </TouchableOpacity>
+
       {contacts.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>👥</Text>
@@ -146,7 +164,6 @@ export default function ContactsScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Search type tabs */}
           <View style={styles.tabRow}>
             <TouchableOpacity
               style={[styles.tab, searchTab === 'name' && styles.tabActive]}
@@ -230,7 +247,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
     marginHorizontal: spacing.md,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   qrBtn: {
     flex: 1,
@@ -241,6 +258,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   qrBtnText: { color: colors.textSecondary, fontSize: 14 },
+  findFriendsBtn: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  findFriendsBtnText: { color: colors.textSecondary, fontSize: 14 },
   empty: {
     flex: 1,
     alignItems: 'center',
