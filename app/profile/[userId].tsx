@@ -7,6 +7,7 @@ import {
   Image,
   ActivityIndicator,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -59,8 +60,12 @@ export default function ProfileViewScreen() {
 
   const openChat = async (mode: 'standard' | 'e2e') => {
     if (!myUserId || !targetId) return;
-    const chatId = await getOrCreateDirectChat(myUserId, targetId, mode);
-    router.push(`/chats/${chatId}`);
+    try {
+      const chatId = await getOrCreateDirectChat(myUserId, targetId, mode);
+      router.push(`/chats/${chatId}`);
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'Could not open chat. Please try again.');
+    }
   };
 
   if (loading) {

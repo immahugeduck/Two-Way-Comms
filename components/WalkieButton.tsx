@@ -35,6 +35,9 @@ export default function WalkieButton({ chatId, onAudioSent, size = 'normal' }: P
   const durationTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoSendTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingActive = useRef(false);
+  // Mutable refs so panResponder always calls the latest version of these callbacks
+  const beginRecordingRef = useRef<() => void>(() => {});
+  const finishRecordingRef = useRef<(cancel: boolean) => void>(() => {});
 
   const btnSize = size === 'large' ? 140 : 80;
 
@@ -137,22 +140,26 @@ export default function WalkieButton({ chatId, onAudioSent, size = 'normal' }: P
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
-        beginRecording();
+        beginRecordingRef.current();
       },
       onPanResponderMove: (_, gs) => {
         if (!recordingActive.current) return;
-        const dy = Math.min(0, gs.dy); // only track upward
+        const dy = Math.min(0, gs.dy);
         slideY.setValue(dy);
         setIsCanceling(gs.dy < CANCEL_THRESHOLD);
       },
       onPanResponderRelease: (_, gs) => {
-        finishRecording(gs.dy < CANCEL_THRESHOLD);
+        finishRecordingRef.current(gs.dy < CANCEL_THRESHOLD);
       },
       onPanResponderTerminate: () => {
-        finishRecording(true);
+        finishRecordingRef.current(true);
       },
     })
   ).current;
+
+  // Keep refs in sync with the latest callback instances
+  useEffect(() => { beginRecordingRef.current = beginRecording; }, [beginRecording]);
+  useEffect(() => { finishRecordingRef.current = finishRecording; }, [finishRecording]);
 
   useEffect(() => {
     return () => {
