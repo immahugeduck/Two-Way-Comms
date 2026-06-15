@@ -43,6 +43,7 @@ export default function ChatsScreen() {
   const fetchChats = async () => {
     if (!userId) return;
 
+    // 1: Get all chat IDs the user belongs to
     const { data: memberRows } = await supabase
       .from('chat_members')
       .select('chat_id')
@@ -55,60 +56,68 @@ export default function ChatsScreen() {
     }
 
     const chatIds = memberRows.map((r) => r.chat_id);
-    const previews: ChatPreview[] = [];
 
-    for (const chatId of chatIds) {
-      const { data: chat } = await supabase
+    // 2-4: Batch all remaining lookups in parallel
+    const [{ data: chatsData }, { data: membersData }, { data: lastMsgs }] = await Promise.all([
+      // All chat metadata
+      supabase
         .from('chats')
-        .select('type, group_name, encryption_mode')
-        .eq('id', chatId)
-        .single();
+        .select('id, type, group_name, encryption_mode')
+        .in('id', chatIds),
+      // All other members + profiles for direct chats
+      supabase
+        .from('chat_members')
+        .select('chat_id, profiles(display_name, username)')
+        .in('chat_id', chatIds)
+        .neq('user_id', userId),
+      // Last message per chat (single query via RPC)
+      supabase.rpc('get_last_messages', { chat_ids: chatIds }),
+    ]);
 
-      const { data: lastMsg } = await supabase
-        .from('messages')
-        .select('content, message_type, created_at, encryption_status')
-        .eq('chat_id', chatId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    // Build lookup maps
+    const chatMap = new Map((chatsData ?? []).map((c) => [c.id, c]));
+    const memberMap = new Map<string, any>();
+    for (const m of membersData ?? []) {
+      if (!memberMap.has(m.chat_id)) memberMap.set(m.chat_id, m.profiles);
+    }
+    const lastMsgMap = new Map<string, any>();
+    for (const m of lastMsgs ?? []) {
+      lastMsgMap.set(m.chat_id, m);
+    }
 
-      let name = 'Unknown';
-      let subtitle = '';
+    // Build previews
+    const previews: ChatPreview[] = chatIds.map((chatId) => {
+      const chat = chatMap.get(chatId);
+      const lastMsg = lastMsgMap.get(chatId);
+      const profile = memberMap.get(chatId) as any;
 
-      if (chat?.type === 'group') {
-        name = chat.group_name ?? 'Group';
-        subtitle = 'Group chat';
-      } else {
-        const { data: other } = await supabase
-          .from('chat_members')
-          .select('profiles(display_name, username)')
-          .eq('chat_id', chatId)
-          .neq('user_id', userId)
-          .limit(1)
-          .maybeSingle();
+      const name =
+        chat?.type === 'group'
+          ? (chat.group_name ?? 'Group')
+          : (profile?.display_name ?? 'Unknown');
+      const subtitle =
+        chat?.type === 'group'
+          ? 'Group chat'
+          : profile?.username
+          ? `@${profile.username}`
+          : '';
 
-        const profile = other?.profiles as any;
-        name = profile?.display_name ?? 'Unknown';
-        subtitle = profile?.username ? `@${profile.username}` : '';
-      }
-
-      // Don't show E2E message content in preview
       let previewContent = lastMsg?.content ?? null;
       if (lastMsg?.encryption_status === 'e2e' && lastMsg.message_type === 'text') {
         previewContent = '🔒 Encrypted message';
       }
 
-      previews.push({
+      return {
         id: chatId,
-        chatType: chat?.type ?? 'direct',
+        chatType: (chat?.type ?? 'direct') as 'direct' | 'group',
         encryptionMode: (chat?.encryption_mode as 'standard' | 'e2e') ?? 'standard',
         name,
         subtitle,
         lastMessage: previewContent,
-        lastMessageType: lastMsg?.message_type ?? null,
+        lastMessageType: (lastMsg?.message_type ?? null) as 'text' | 'audio' | null,
         lastMessageAt: lastMsg?.created_at ?? null,
-      });
-    }
+      };
+    });
 
     setChats(
       previews.sort((a, b) =>

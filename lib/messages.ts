@@ -119,8 +119,7 @@ export async function markMessagesRead(
 ): Promise<void> {
   if (!messageIds.length) return;
   const rows = messageIds.map((message_id) => ({ message_id, user_id: userId, chat_id: chatId }));
-  await supabase.from('message_reads').insert(rows);
-  // Ignore conflict errors (already-read messages) — they're expected
+  await supabase.from('message_reads').upsert(rows, { ignoreDuplicates: true });
 }
 
 // Returns all read records for a chat (used to seed initial readBy state).

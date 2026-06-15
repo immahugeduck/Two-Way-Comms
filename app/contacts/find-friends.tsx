@@ -62,6 +62,8 @@ export default function FindFriendsScreen() {
   }, []);
 
   const scan = async () => {
+    if (!myUserId) return;
+
     const { status } = await Contacts.requestPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission needed', 'Allow access to contacts to find friends on 2Way.');
@@ -103,7 +105,7 @@ export default function FindFriendsScreen() {
         .from('profiles')
         .select('id, display_name, username, avatar_url, phone')
         .in('phone', chunk)
-        .neq('id', myUserId ?? '');
+        .neq('id', myUserId);
       for (const row of rows ?? []) {
         if (row.phone) {
           foundUsers.push({
@@ -135,11 +137,11 @@ export default function FindFriendsScreen() {
       contact_user_id: user.id,
       status: 'accepted',
     });
-    if (error && !error.message.includes('duplicate')) {
+    if (error && (error as any).code !== '23505') {
       Alert.alert('Error', error.message);
-    } else {
-      Alert.alert('Added!', `${user.display_name} added to your contacts.`);
+      return;
     }
+    Alert.alert('Added!', `${user.display_name} added to your contacts.`);
   };
 
   const openChat = async (user: AppUser) => {
