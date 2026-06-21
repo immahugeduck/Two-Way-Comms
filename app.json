@@ -66,6 +66,11 @@
     "scheme": "twoway",
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "795faea2-1cb6-4c47-b73c-4ae0b53b3a08"
+      }
     }
   }
 }
