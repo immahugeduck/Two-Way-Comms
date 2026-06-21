@@ -9,7 +9,9 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "branch:v2": "bash ./scripts/branch-v2.sh",
+    "branches:prune": "bash ./scripts/prune-nonv2-branches.sh"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
