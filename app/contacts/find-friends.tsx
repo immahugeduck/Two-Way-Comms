@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  FlatList,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -29,6 +28,13 @@ interface NotOnApp {
   deviceName: string;
   phone: string;
 }
+
+type ContactListItem = AppUser | NotOnApp;
+type ContactSection = {
+  title: string;
+  data: ContactListItem[];
+  type: 'app' | 'invite';
+};
 
 function normalizePhone(raw: string): string | null {
   const cleaned = raw.replace(/[^\d+]/g, '');
@@ -172,13 +178,13 @@ export default function FindFriendsScreen() {
           )}
         </TouchableOpacity>
         <Text style={[typography.caption, styles.privacyNote]}>
-          Phone numbers are checked against 2Way's database. Names are never uploaded.
+          Phone numbers are checked against the 2Way database. Names are never uploaded.
         </Text>
       </View>
     );
   }
 
-  const sections = [
+  const sections: ContactSection[] = [
     ...(onApp.length > 0 ? [{ title: `ON 2WAY (${onApp.length})`, data: onApp, type: 'app' as const }] : []),
     ...(notOnApp.length > 0 ? [{ title: `INVITE TO 2WAY (${notOnApp.length})`, data: notOnApp, type: 'invite' as const }] : []),
   ];
