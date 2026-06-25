@@ -71,6 +71,8 @@
       "eas": {
         "projectId": "795faea2-1cb6-4c47-b73c-4ae0b53b3a08"
       }
-    }
-  }
+    },
+    "sdkVersion": "54.0.0"
+  },
+  "name": "2way-secure-walkie"
 }
